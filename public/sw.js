@@ -1,6 +1,6 @@
-// LYNKO CHAT service worker — app shell + last-seen chats work offline.
-// Cached API data is the same ENCRYPTED data the server sends; it is wiped on logout.
-const SHELL = 'lynko-shell-v13', API = 'lynko-api-v2', EXT = 'lynko-ext-v2';
+// LYNKO CHAT service worker — app shell + saved media work offline (chat data is kept by /offline.js in IndexedDB).
+// Cached media is the same ENCRYPTED data the server sends; it is wiped on logout.
+const SHELL = 'lynko-shell-v14', API = 'lynko-api-v2', EXT = 'lynko-ext-v2';
 const PRE = ['/', '/chat', '/manifest.json', '/icons/icon-192.png', '/icons/icon-512.png'];
 const READ = /^\/api\/(me|config|chats|messages|statuses|official|dp\/|banner\/|blob\/|status\/)/;
 const IMMUTABLE = /^\/api\/(blob\/|dp\/|banner\/|status\/[^/]+\/blob)/;   // media never changes -> cache first
@@ -10,6 +10,7 @@ self.addEventListener('install', e => {
 });
 self.addEventListener('activate', e => {
   e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => ![SHELL, API, EXT, 'lynko-lock'].includes(k)).map(k => caches.delete(k))))
+    .then(() => caches.open(API)).then(async c => { for (const k of await c.keys()) if (!IMMUTABLE.test(new URL(k.url).pathname)) await c.delete(k); })   // chat lists / messages now live in IndexedDB (offline.js), only media stays here
     .then(() => self.clients.claim()));
 });
 
@@ -72,7 +73,7 @@ self.addEventListener('fetch', e => {
   }
   if (url.pathname === '/health' || url.pathname.startsWith('/admin') || url.pathname.endsWith('.apk')) return;   // never cache admin / the APK
   if (url.pathname.startsWith('/api/')) {
-    if (READ.test(url.pathname)) e.respondWith(apiRead(req, url));
+    if (IMMUTABLE.test(url.pathname)) e.respondWith(apiRead(req, url));   // media: cache first. Everything else goes straight to the network; the page keeps its own offline copy
     return;
   }
   // pages & static files: network first, saved copy when offline
