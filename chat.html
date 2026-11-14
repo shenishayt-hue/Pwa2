@@ -129,6 +129,7 @@ input:focus{border-color:var(--rose)}
 .ring.un,.ring.mine{background:linear-gradient(135deg,var(--peach),var(--rose) 55%,var(--lilac))}.ring.none{background:none}
 .ring .av{border:2px solid #1d0817;box-sizing:content-box}
 .ring .plus{position:absolute;right:-2px;bottom:-2px;width:22px;height:22px;border-radius:50%;background:linear-gradient(135deg,var(--rose),#c14bff);display:grid;place-items:center;font-weight:700;border:2px solid #1d0817;font-size:15px;line-height:1}
+.rpb{display:flex;align-items:center;gap:8px;padding:6px 12px;background:#2a0f22;border-top:1px solid var(--line)}.rpb[hidden]{display:none}.rpb>div{flex:1;min-width:0;border-left:3px solid var(--peach);padding-left:8px}.rpb b{display:block;color:var(--peach);font-size:12.5px}.rpb span{display:block;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:13.5px}.rpb button{width:32px;height:32px;border-radius:50%;background:#0006;flex:none}.row .b{transition:box-shadow .3s}.row.hl .b{box-shadow:0 0 0 2px var(--peach)}.qt{cursor:pointer}
 .qt{display:flex;gap:8px;align-items:center;background:rgba(0,0,0,.25);border-left:3px solid var(--peach);border-radius:8px;padding:5px 8px;margin-bottom:5px;font-size:13.5px;overflow:hidden}
 .qt img{width:40px;height:40px;object-fit:cover;border-radius:6px;flex:none}.qt>div{min-width:0}
 .qt b{display:block;color:var(--peach);font-size:12.5px}.qt span{display:block;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:240px}
@@ -236,7 +237,7 @@ input:-webkit-autofill,textarea:-webkit-autofill{-webkit-box-shadow:0 0 0 100px 
 <meta name="apple-mobile-web-app-title" content="LYNKO CHAT">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="icon" href="/icons/icon-192.png">
-<script src="/install.js?v={{V}}" defer></script>
+<script src="/offline.js?v={{V}}"></script><script src="/install.js?v={{V}}" defer></script><script src="/heal.js?v={{V}}" defer></script><script src="/smooth.js?v={{V}}" defer></script>
 <script>(function(){var vv=window.visualViewport,f=function(){document.documentElement.style.setProperty('--vh',((vv?vv.height:window.innerHeight)*0.01)+'px');if(scrollY||scrollX)scrollTo(0,0)};f();
 addEventListener('resize',f);addEventListener('orientationchange',function(){setTimeout(f,150)});addEventListener('scroll',function(){if(scrollY||scrollX)scrollTo(0,0)},{passive:true});
 if(vv){vv.addEventListener('resize',f);vv.addEventListener('scroll',f)}document.addEventListener('focusout',function(){setTimeout(f,80)})})()</script>
@@ -261,6 +262,7 @@ if(vv){vv.addEventListener('resize',f);vv.addEventListener('scroll',f)}document.
     </div>
     <div class="msgs" id="msgs" hidden></div>
     <div class="attm" id="attm" hidden><button id="gal">🖼<span>Gallery</span></button><button id="cam">📷<span>Camera</span></button></div>
+    <div class="rpb" id="rpb" hidden><div><b></b><span></span></div><button id="rpx" type="button" aria-label="Cancel reply">✕</button></div>
     <div class="comp" id="comp" hidden>
       <div class="pill"><button class="ib" id="att" type="button">📎</button><textarea id="txt" rows="1" placeholder="Message" enterkeyhint="send"></textarea><button class="ib" id="mic" type="button" aria-label="Voice message">🎙</button></div>
       <button class="send" id="send" type="button">❤</button>
@@ -281,10 +283,19 @@ const b64=b=>{let s='',u=new Uint8Array(b);for(let i=0;i<u.length;i+=32768)s+=St
 const unb64=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
 const toast=t=>{const d=document.createElement('div');d.className='toast';d.textContent=t;document.body.appendChild(d);setTimeout(()=>d.remove(),2400)};
 async function api(url,method='GET',body){
-  const r=await fetch(url,{method,headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined});
+  const get=method=='GET',keep=get&&OFF.ok(url);let r;
+  try{
+    const ac=new AbortController(),tm=keep?setTimeout(()=>ac.abort(),15000):0;   // slow / half-dead network -> saved copy after 15 s
+    try{r=await fetch(url,{method,headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined,signal:ac.signal})}finally{clearTimeout(tm)}
+  }catch(e){
+    OFF.net(false);
+    if(keep){const d=await OFF.read(url);if(d!==undefined)return d}
+    const x=new Error(get?'You are offline':'No internet');x.net=true;throw x}
+  OFF.net(true);
   if(r.status==401){leave();throw new Error('auth')}
-  const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'Error');return d}
-function leave(){['lynko_priv','lynko_enc'].forEach(k=>localStorage.removeItem(k));sessionStorage.removeItem('lynko_priv');(window.caches?caches.delete('lynko-api-v2'):Promise.resolve()).catch(()=>{}).finally(()=>{location.href='/'})}
+  const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'Error');
+  if(keep)OFF.save(url,d);return d}
+function leave(){['lynko_priv','lynko_enc'].forEach(k=>localStorage.removeItem(k));sessionStorage.removeItem('lynko_priv');try{OFF.wipe()}catch{}(window.caches?caches.delete('lynko-api-v2'):Promise.resolve()).catch(()=>{}).finally(()=>{location.href='/'})}
 
 let me,priv,cur=null,contacts=new Map(),chats=new Map(),msgs=[],seen=new Set(),keys={},urls={},pl=new Map(),unlocked=new Set(),lastDay='',tc=0,typingT={},lastTy=0;
 const hm=t=>new Date(t).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
@@ -306,7 +317,7 @@ async function payload(m){
   if(pl.has(m.id))return pl.get(m.id);
   const peer=m.from==me.id?m.to:m.from;let p;
   try{p=JSON.parse(dec.decode(await open(peer,m.iv,unb64(m.ct))))}catch{p={k:'text',v:'🔒 Couldn’t decrypt this message'}}
-  pl.set(m.id,p);return p}
+  pl.set(m.id,p);try{OFF.warm(m,p)}catch{}return p}
 
 // ── dialogs ──
 function ask(title,{pin=false,ok='OK'}={}){return new Promise(res=>{
@@ -500,7 +511,7 @@ function reconcile(list){   // server list is the truth: refresh ticks / reactio
   mcache.set(cur,msgs.filter(m=>!m.pending))}
 async function openChat(id){
   if(LOCK.chat.has(id)&&!(await LOCK.chat.gate()))return;
-  const first=!cur,tok=++openTok;cur=id;msgs=[];seen=new Set();lastDay='';warmBanner(contacts.get(id));
+  try{clearReply()}catch{}const first=!cur,tok=++openTok;cur=id;msgs=[];seen=new Set();lastDay='';warmBanner(contacts.get(id));
   history[first?'pushState':'replaceState']({c:1},'');
   $('app').classList.add('chatting');['head','msgs','comp'].forEach(x=>$(x).hidden=false);$('none').hidden=true;
   const c=contacts.get(id);$('hn').textContent=c.username;$('hav').innerHTML=av(c);F.typingStop();setSub();F.hdr();
@@ -508,12 +519,12 @@ async function openChat(id){
   micVis();shared(id).catch(()=>{});   // derive the encryption key now so your first send has zero wait
   const cached=(mcache.get(id)||[]).filter(m=>live24(m)&&pl.has(m.id));
   if(cached.length){paintBatch(cached,true);scrollEnd()}
-  let list;try{list=await api('/api/messages?with='+id)}catch(e){if(tok==openTok&&!cached.length&&e.message!='auth')toast('Couldn’t load messages');return}
+  let list;try{list=await api('/api/messages?with='+id)}catch(e){if(tok==openTok&&!cached.length&&e.message!='auth'&&!e.net)toast('Couldn’t load messages');return}
   if(tok!=openTok)return;
   await Promise.all(list.map(payload));if(tok!=openTok)return;
   const empty=!msgs.length;reconcile(list);if(empty)scrollEnd();markRead();micVis();
 }
-function closeChat(){recCancel();F.typingStop();$('app').classList.remove('chatting');['head','msgs','comp'].forEach(x=>$(x).hidden=true);$('none').hidden=false;$('attm').hidden=true;cur=null;renderList()}
+function closeChat(){try{clearReply()}catch{}recCancel();F.typingStop();$('app').classList.remove('chatting');['head','msgs','comp'].forEach(x=>$(x).hidden=true);$('none').hidden=false;$('attm').hidden=true;cur=null;renderList()}
 addEventListener('popstate',()=>{if(skipPop){skipPop=0;return}if(sv){sv._close(true);return}const so=$('setov');if(so){so.remove();return}if(cur)closeChat()});
 $('back').onclick=()=>history.back();
 async function pull(){
@@ -606,7 +617,7 @@ function paint(m,p,into){
   if(p.k=='text'&&p.st&&window.STK&&STK.has(p.st)){b.classList.add('stk');b.appendChild(STK.el(p.st))}
   else if(p.k=='text'){
     if(p.re){const q=document.createElement('div'),th=safeTh(p.re.th);q.className='qt';q.innerHTML=(th?'<img alt="">':'')+'<div><b></b><span></span></div>';
-      if(th)q.querySelector('img').src=th;q.querySelector('b').textContent='Status';
+      if(th)q.querySelector('img').src=th;q.querySelector('b').textContent=String(p.re.who||'Status').slice(0,30);if(p.re.mid)q.onclick=e=>{e.stopPropagation();const el=$('m'+p.re.mid);if(el){el.scrollIntoView({block:'center',behavior:'smooth'});el.classList.add('hl');setTimeout(()=>el.classList.remove('hl'),1300)}};
       q.querySelector('span').textContent=p.re.k=='text'?String(p.re.t||''):(p.re.k=='img'?'📷 ':'🎥 ')+String(p.re.t||(p.re.k=='img'?'Photo':'Video'));b.appendChild(q)}
     const t=document.createElement('div');t.className='tx';t.textContent=p.v;if(!p.re&&jumbo(p.v))b.classList.add('jumbo');b.appendChild(t)}
   else if(p.k=='aud'){b.classList.add('aud');b.appendChild(audioBox(m,p))}
@@ -632,6 +643,7 @@ function menu(id){
   o.onclick=e=>{if(e.target==o)o.remove()};
   o.querySelectorAll('.emo button').forEach(b=>b.onclick=()=>{o.remove();react(id,b.textContent,$('m'+id))});
   const act=o.querySelector('.act'),add=(t,f)=>{const b=document.createElement('button');b.className='mi';b.textContent=t;b.onclick=()=>{o.remove();f()};act.appendChild(b)};
+  if(cur!='ai'&&cur!='official')add('Reply',()=>setReply(id));
   if((p.k=='text'&&!p.st)||p.cap)add('Copy',()=>copyText(p.k=='text'?p.v:p.cap));
   if(mine)add('Delete for everyone',async()=>{if(await ask('Delete this message for everyone?',{ok:'Delete'}))api('/api/messages/'+id,'DELETE').catch(e=>toast(e.message))});
   document.body.appendChild(o)}
@@ -642,26 +654,43 @@ async function react(id,e,el){
 
 // ── sending: instant bubble first, network after ──
 async function upMedia(bytes){
-  const r=await fetch('/api/media',{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:bytes});
+  let r;try{r=await fetch('/api/media',{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:bytes})}catch{OFF.net(false);const x=new Error('No internet');x.net=true;throw x}
   if(r.status==401){leave();throw new Error('auth')}
   const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'Upload failed');return d.key}
+const outbox=[];let flushing=0;
+async function flushOutbox(){if(flushing||!outbox.length||!navigator.onLine)return;flushing=1;
+  try{while(outbox.length){const f=outbox[0];try{await f();outbox.shift()}catch(e){if(e&&e.net)break;outbox.shift()}}}finally{flushing=0}}
+OFF.onBack(()=>flushOutbox());addEventListener('online',()=>setTimeout(flushOutbox,600));
 async function deliver(kind,p,bytes,local,to){
   const peer=to||cur,show=peer==cur,m={id:'t'+Math.random().toString(36).slice(2,8)+(++tc),from:me.id,to:peer,kind,ts:new Date().toISOString(),media:kind!='text',rx:{},r:false,pending:true};
   const drop=()=>{const i=msgs.indexOf(m);if(i>-1)msgs.splice(i,1)};
   pl.set(m.id,p);if(local)urls[m.id]=local;seen.add(m.id);if(show){msgs.push(m);paint(m,p)}
-  try{
-    const s=await seal(peer,enc.encode(JSON.stringify(p))),body={to:peer,kind,iv:s.iv,ct:b64(s.ct),tmp:m.id};
-    if(bytes){const sb=await seal(peer,bytes);body.bIv=sb.iv;body.bkey=await upMedia(sb.ct)}   // encrypted file goes to the bucket, never to Mongo
+  let sealed=null,bkey=null;   // survive a retry: encrypt once, upload once
+  const go=async()=>{
+    if(!sealed)sealed=await seal(peer,enc.encode(JSON.stringify(p)));
+    const body={to:peer,kind,iv:sealed.iv,ct:b64(sealed.ct),tmp:m.id};
+    if(bytes){if(!bkey){const sb=await seal(peer,bytes);bkey={iv:sb.iv,key:await upMedia(sb.ct)}}body.bIv=bkey.iv;body.bkey=bkey.key}   // encrypted file goes to the bucket, never to Mongo
     const real=await api('/api/messages','POST',body),el=$('m'+m.id);
     pl.set(real.id,p);if(urls[m.id])urls[real.id]=urls[m.id];
     if(seen.has(real.id)){el?.remove();drop()}
     else{seen.add(real.id);Object.assign(m,real);m.pending=false;if(dlvSeen.has(real.id))m.d=true;if(el){el.id='m'+real.id;tickEl(el)}}
-    cacheMsg(peer,m);setLast(peer,real,0).then(renderList);
-  }catch(e){$('m'+m.id)?.remove();drop();seen.delete(m.id);toast('Not sent: '+e.message)}
+    cacheMsg(peer,m);OFF.addMsg(peer,real);setLast(peer,real,0).then(renderList)};
+  try{await go()}
+  catch(e){
+    if(e&&e.net){outbox.push(go);if(!deliver._t||Date.now()-deliver._t>4000){deliver._t=Date.now();toast('Waiting for internet — it will send by itself')}return}   // bubble stays with the clock icon
+    $('m'+m.id)?.remove();drop();seen.delete(m.id);toast('Not sent: '+e.message)}
 }
+let rpl=null;
+function setReply(id){const m=msgs.find(x=>x.id==id),p=pl.get(id);if(!m||!p||m.pending)return;
+  const who=m.from==me.id?'You':((contacts.get(m.from)||{}).username||''),
+    t=p.k=='text'?(p.st?'🧸 Sticker':p.v):p.k=='aud'?'🎤 Voice message':(p.k=='img'?'📷 ':'🎥 ')+(p.cap||(p.k=='img'?'Photo':'Video'));
+  rpl={mid:id,who,t:String(t).slice(0,80),th:p.k=='img'||p.k=='vid'?safeTh(p.th):''};
+  const b=$('rpb');b.hidden=false;b.querySelector('b').textContent=who||'Reply';b.querySelector('span').textContent=rpl.t;$('txt').focus({preventScroll:true})}
+function clearReply(){rpl=null;const b=$('rpb');if(b)b.hidden=true}
+$('rpx').onclick=clearReply;
 function sendText(){
   if(!cur)return;if(cur=='ai')return F.aiSend($('txt').value);F.typingStop();const v=$('txt').value.trim(),t=v||'❤️';$('txt').value='';grow();
-  if(!v||love({k:'text',v:t}))burst();deliver('text',{k:'text',v:t});$('txt').focus({preventScroll:true})}
+  if(!v||love({k:'text',v:t}))burst();deliver('text',rpl?{k:'text',v:t,re:{k:'text',t:rpl.t,who:rpl.who,mid:rpl.mid,th:rpl.th}}:{k:'text',v:t});clearReply();$('txt').focus({preventScroll:true})}
 function grow(){const t=$('txt');t.style.height='auto';t.style.height=Math.min(t.scrollHeight,120)+'px';$('send').textContent=t.value.trim()?'➤':'❤';micVis()}
 function micVis(){const m=$('mic');if(m)m.hidden=cur=='ai'||cur=='official'||!!(contacts.get(cur)&&contacts.get(cur).bot)||!!$('txt').value.trim()}
 $('send').addEventListener('pointerdown',e=>e.preventDefault());   // keeps the keyboard open
@@ -927,7 +956,7 @@ addEventListener('pageshow',e=>{if(e.persisted&&$('q').value){$('q').value='';qs
 $('q').addEventListener('keydown',e=>{if(e.key=='Enter'){clearTimeout(qT);codeCheck(e.target.value.trim())}});
 document.querySelectorAll('#chips button').forEach(b=>b.onclick=()=>{flt=b.dataset.f;document.querySelectorAll('#chips button').forEach(x=>x.classList.toggle('on',x==b));renderList()});
 $('n1').onclick=()=>{if(tab!='chats')setTab('chats');else $('list').scrollTo({top:0,behavior:'smooth'})};$('n4').onclick=()=>setTab('status');$('n5').onclick=()=>setTab('calls');$('n2').onclick=wallpaper;$('n3').onclick=()=>settings();
-$('menub').onclick=()=>items([['⚙️ Settings',()=>settings()],['👤 Profile & About',profile],['🔔 Notifications',F.notifOn],['🖼 Wallpaper',wallpaper],['➕ Add contact',addContact],['⎋ Log out',async()=>{await fetch('/api/logout',{method:'POST'});leave()}]]);
+$('menub').onclick=()=>items([['⚙️ Settings',()=>settings()],['👤 Profile & About',profile],['🔔 Notifications',F.notifOn],['🖼 Wallpaper',wallpaper],['➕ Add contact',addContact],['🛠 Fix problems',()=>window.HEAL&&HEAL.run(true)],['⎋ Log out',async()=>{await fetch('/api/logout',{method:'POST'});leave()}]]);
 $('hav').onclick=()=>{if(cur=='official'){const o=sheet(`<div class="pf">${offAv('big')}<h3 style="margin:0">Lynko Official${VF}</h3><p style="color:var(--mut);text-align:center">Official news and updates from the Lynko team.<br>You can’t reply in this channel.</p></div>`);return}const c=contacts.get(cur);if(!c)return;
   LX.contact(c,{avatar:av(c,'big'),locked:LOCK.chat.has(c.id),rename:()=>renameContact(c.id),lock:()=>LOCK.chat.toggle(c.id),call:()=>F.callStart(c.id)})};
 $('hmenu').onclick=()=>cur=='ai'?items([['🖼 Wallpaper',wallpaper],['🧹 Clear AI chat',F.aiClear]]):cur=='official'?items([['🖼 Wallpaper',wallpaper]]):items([['✏️ Rename contact',()=>renameContact(cur)],['🖼 Wallpaper',wallpaper],[LOCK.chat.has(cur)?'🔓 Unlock this chat':'🔒 Lock this chat',()=>LOCK.chat.toggle(cur)]]);
@@ -944,7 +973,8 @@ document.addEventListener('visibilitychange',()=>{
   priv=await crypto.subtle.importKey('jwk',JSON.parse(pj),{name:'ECDH',namedCurve:'P-256'},false,['deriveKey']);
   contacts=new Map(me.contacts.map(c=>[c.id,nick(c)]));paintMe();applyWp();try{renderList()}catch(e){console.error(e)}warmBanners();loadChats().catch(()=>{}).then(ackAll);loadStatuses().catch(()=>{});loadOfficial().catch(()=>{});
   if(typeof Pusher==='undefined')await new Promise(r=>{const e=$('pjs');if(!e)return r();e.addEventListener('load',r);e.addEventListener('error',r);setTimeout(r,5000)});
-  if(typeof Pusher==='undefined')return;   // offline: show saved chats only
+  window.__lynkoReady=1;
+  if(typeof Pusher==='undefined'){OFF.onBack(()=>{if(typeof Pusher==='undefined'&&!sessionStorage.getItem('lk_ob')){sessionStorage.setItem('lk_ob','1');location.reload()}});return}   // offline: show saved chats only; reload once when the network returns
   const ps=new Pusher(cfg.key,{cluster:cfg.cluster,channelAuthorization:{endpoint:'/api/pusher/auth'}}),ch=ps.subscribe('private-u-'+me.id);
   ch.bind('msg',async d=>{
     if(d.from!=me.id)ackDlv(d.id);   // our phone has it -> sender's tick turns into ✓✓
@@ -952,12 +982,13 @@ document.addEventListener('visibilitychange',()=>{
     const peer=d.from==me.id?d.to:d.from;
     if(!contacts.has(peer)){await loadContacts();keys={}}
     if(!d.ct){peer==cur?pull():loadChats();return}
+    OFF.addMsg(peer,d);
     const live=peer==cur&&!document.hidden;
     await setLast(peer,d,undefined,true);
     if(live){await addMsg(d,true);if(d.from!=me.id)markRead()}
     else if(d.from!=me.id&&peer!=cur)navigator.vibrate?.(20);
     if(!live&&d.from!=me.id)F.notify(peer,d);renderList()});
-  ch.bind('del',d=>{const i=msgs.findIndex(m=>m.id==d.id);if(i>-1)msgs.splice(i,1);$('m'+d.id)?.remove();mcache.forEach((a,k)=>mcache.set(k,a.filter(m=>m.id!=d.id)));loadChats().catch(()=>{})});
+  ch.bind('del',d=>{OFF.delMsg(d.id);const i=msgs.findIndex(m=>m.id==d.id);if(i>-1)msgs.splice(i,1);$('m'+d.id)?.remove();mcache.forEach((a,k)=>mcache.set(k,a.filter(m=>m.id!=d.id)));loadChats().catch(()=>{})});
   ch.bind('read',d=>{msgs.forEach(m=>{if(m.from==me.id&&m.to==d.by&&!m.pending&&!m.r){m.r=m.d=true;tickEl($('m'+m.id))}});mcache.forEach(a=>a.forEach(m=>{if(m.from==me.id&&m.to==d.by&&!m.pending)m.r=m.d=true}));const c=chats.get(d.by);if(c&&c.m.from==me.id)c.m.r=c.m.d=true;renderList()});
   ch.bind('dlv',d=>setDlv(d.ids||[],d.by));
   ch.bind('rx',d=>{setRx(d.id,d.rx);if(d.by!=me.id&&d.rx[d.by]=='❤️'){const r=$('m'+d.id)?.getBoundingClientRect();if(r)burst(r.left+r.width/2,r.top)}});
@@ -968,6 +999,7 @@ document.addEventListener('visibilitychange',()=>{
   oc.bind('odel',()=>loadOfficial().catch(()=>{}));
   for(const ev of ['status','sview','sdel'])ch.bind(ev,()=>loadStatuses().catch(()=>{}));
   ch.bind('prof',()=>loadContacts().then(()=>{if(cur)setSub()}).catch(()=>{}));
+  OFF.onBack(()=>{if(cur)pull().catch(()=>{});loadChats().catch(()=>{}).then(ackAll);loadStatuses().catch(()=>{});loadOfficial().catch(()=>{})});
   let first=1;ps.connection.bind('connected',()=>{if(first){first=0;return}if(cur)pull();loadChats().catch(()=>{}).then(ackAll);loadStatuses().catch(()=>{});loadOfficial().catch(()=>{})});
   F.init({ps,ch,cfg});
 })();
