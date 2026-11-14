@@ -49,6 +49,15 @@ const tok = req => ((req.headers.cookie || '').split(';').map(s => s.trim()).fin
 const auth = (req, res, next) => { try { req.u = jwt.verify(tok(req), SECRET); mon.touch(req.u.id); next(); } catch { res.status(401).json({ error: 'Login required' }); } };
 const give = (res, u) => res.cookie('lynko', jwt.sign({ id: u.id, u: u.username }, SECRET, { expiresIn: '30d' }),
   { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' || !!res.req.secure, maxAge: 30 * 864e5 });
+// ── flood limit: 600 API calls / minute per login session (or per IP when logged out); media + error reports are exempt ──
+const apiHits = new Map();
+app.use('/api', (q, r, n) => {
+  if (/^\/(blob|dp|banner|log-error|status\/[^/]+\/blob)/.test(q.path)) return n();
+  const k = (q.ip || '') + '|' + tok(q).slice(-16), t = Date.now(), a = apiHits.get(k);
+  if (!a || t - a.t > 6e4) apiHits.set(k, { t, n: 1 }); else if (++a.n > 600) return r.status(429).json({ error: 'Too many requests — slow down a little' });
+  n();
+});
+setInterval(() => apiHits.clear(), 6e5).unref();
 // ── Cloudflare Turnstile (bot / credential-stuffing shield for login + register) ──
 const TS_SITE = process.env.TURNSTILE_SITE_KEY, TS_SECRET = process.env.TURNSTILE_SECRET;
 if (!TS_SITE || !TS_SECRET) console.warn('⚠ Cloudflare Turnstile is OFF — set TURNSTILE_SITE_KEY + TURNSTILE_SECRET to protect login/register');
@@ -104,7 +113,11 @@ async function push(uid, payload, force) {
 }
 
 // ── Lynko AI (Groq) ──
-const GROQ_KEY = process.env.GROQ_API_KEY, GROQ_MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
+const GROQ_KEY = process.env.GROQ_API_KEY, GROQ_MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';   // optional backup only
+// primary AI = the Supun API (key stays on the server, never in the browser)
+const SUPUN_KEY = process.env.SUPUN_API_KEY, SUPUN_URL = process.env.SUPUN_API_URL || 'https://supunofc.site/api/ai/chatday/chat', SUPUN_MODEL = process.env.SUPUN_MODEL || 'openai/gpt-5.4';
+const AI_READY = !!(SUPUN_KEY || GROQ_KEY);
+if (!SUPUN_KEY) console.warn('⚠ SUPUN_API_KEY is not set — Lynko AI ' + (GROQ_KEY ? 'will use the Groq backup' : 'is disabled'));
 let goodModel = '';   // the model that last worked (skips retired ones)
 const aiHits = new Map();
 const aiLimited = id => { const n = Date.now(), a = (aiHits.get(id) || []).filter(t => n - t < 6e4); a.push(n); aiHits.set(id, a); if (aiHits.size > 5e3) aiHits.clear(); return a.length > 20; };
@@ -151,7 +164,7 @@ app.get('/img/:n', async (q, r) => {   // official-account logo + AI icon (the C
 app.get('/icons/:name', require('./icons'));   // LYNKO CHAT logo -> app icons
 app.use(express.static(path.join(__dirname, 'public'), { maxAge: '7d', index: false,
   setHeaders: (r, f) => { if (/\.(js|json|html)$/.test(f)) r.set('Cache-Control', 'no-cache'); } }));   // lock.js / install.js fixes reach everyone at once
-app.get('/api/config', (q, r) => r.json({ turnstile: TS_SITE && TS_SECRET ? TS_SITE : null, key: process.env.PUSHER_KEY, cluster: process.env.PUSHER_CLUSTER, cc: CC, vapid: webpush ? process.env.VAPID_PUBLIC_KEY : null, ai: !!GROQ_KEY }));
+app.get('/api/config', (q, r) => r.json({ turnstile: TS_SITE && TS_SECRET ? TS_SITE : null, key: process.env.PUSHER_KEY, cluster: process.env.PUSHER_CLUSTER, cc: CC, vapid: webpush ? process.env.VAPID_PUBLIC_KEY : null, ai: AI_READY }));
 
 // ── accounts ──
 app.post('/api/register', async (req, res) => {
@@ -554,8 +567,33 @@ STYLE:
 - Be kind and respectful. Don't help with anything harmful or illegal. Never claim to be Meta AI, ChatGPT or another brand — you are Lynko AI.
 ${APP_GUIDE}`;
 
+// ── Supun AI: the API takes ONE prompt string and returns JSON { result: { result: "text" } } (no streaming) ──
+const supunText = j => { let x = j; for (let i = 0; i < 4 && x && typeof x == 'object'; i++) x = x.result !== undefined ? x.result : x.message !== undefined ? x.message : x.text !== undefined ? x.text : x.response !== undefined ? x.response : null; return typeof x == 'string' ? x.trim() : ''; };
+const flat = (sys, list) => `${sys}\n\n--- CONVERSATION SO FAR ---\n` + list.slice(0, -1).map(m => (m.role == 'user' ? 'User: ' : 'Lynko AI: ') + m.content).join('\n') + `\n--- NEW MESSAGE ---\nUser: ${list[list.length - 1].content}\nLynko AI:`;
+async function askSupun(prompt, signal) {
+  const sig = () => { const t = AbortSignal.timeout(45000); return signal ? AbortSignal.any([t, signal]) : t; };
+  const tryPost = async () => {
+    const r = await fetch(SUPUN_URL, { method: 'POST', signal: sig(), headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ prompt, model: SUPUN_MODEL, apikey: SUPUN_KEY }) });
+    const t = await r.text(); let j; try { j = JSON.parse(t) } catch {}
+    if (r.status === 401 || r.status === 403) { const e = new Error('Supun key rejected'); e.auth = true; throw e; }
+    if (!r.ok || !j) throw new Error('post ' + r.status + ' ' + t.slice(0, 120));
+    if (j.success === false) throw new Error('post fail ' + JSON.stringify(j).slice(0, 160));
+    const out = supunText(j); if (!out) throw new Error('empty'); return out;
+  };
+  const tryGet = async () => {   // fallback: same API through the query string (short prompts only)
+    const u = new URL(SUPUN_URL); u.searchParams.set('prompt', prompt.slice(-3500)); u.searchParams.set('model', SUPUN_MODEL); u.searchParams.set('apikey', SUPUN_KEY);
+    const r = await fetch(u, { signal: sig(), headers: { Accept: 'application/json' } });
+    if (r.status === 401 || r.status === 403) { const e = new Error('Supun key rejected'); e.auth = true; throw e; }
+    const j = await r.json().catch(() => null); if (!r.ok || !j || j.success === false) throw new Error('get ' + r.status);
+    const out = supunText(j); if (!out) throw new Error('empty'); return out;
+  };
+  let err;
+  for (const f of [tryPost, tryGet, tryPost]) { try { return await f() } catch (e) { err = e; if (e.auth || (signal && signal.aborted)) break; } }
+  throw err;
+}
+
 app.post('/api/ai', auth, async (req, res) => {
-  if (!GROQ_KEY) return res.status(503).json({ error: 'AI is not set up on the server (GROQ_API_KEY)' });
+  if (!AI_READY) return res.status(503).json({ error: 'AI is not set up on the server (SUPUN_API_KEY)' });
   if (aiLimited(req.u.id)) return res.status(429).json({ error: 'Slow down a little — try again in a minute' });
   const help = !!(req.body && req.body.help);
   const list = (Array.isArray(req.body && req.body.messages) ? req.body.messages : []).slice(-20)
@@ -563,6 +601,20 @@ app.post('/api/ai', auth, async (req, res) => {
     .map(m => ({ role: m.role, content: m.content.slice(0, 4000) }));
   if (!list.length || list[list.length - 1].role !== 'user') return res.status(400).json({ error: 'Bad request' });
   const ac = new AbortController(); res.on('close', () => ac.abort());
+  if (SUPUN_KEY) {
+    try {
+      const text = await askSupun(flat(help ? HELP_SYS : AI_SYS(req.u.u), list), ac.signal);
+      mon.count('ai');
+      res.set({ 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-cache, no-transform', 'X-Accel-Buffering': 'no' });
+      res.flushHeaders();
+      for (let i = 0; i < text.length && !ac.signal.aborted; i += 24) { res.write(text.slice(i, i + 24)); if (text.length > 120) await new Promise(r => setTimeout(r, 12)); }   // typed-out feel in the app
+      return res.end();
+    } catch (e) {
+      console.error('supun ai', e.message); mon.logError('ai', e, { backup: !!GROQ_KEY });
+      if (ac.signal.aborted) return;
+      if (!GROQ_KEY) return res.status(502).json({ error: e.auth ? 'AI key is invalid — update SUPUN_API_KEY on the server' : 'AI is busy, try again shortly' });
+    }
+  }
   let r;
   const ask = model => {
     const oss = /gpt-oss/.test(model);   // gpt-oss "thinks" first: keep that short and hidden so the answer fits in the token limit
