@@ -115,7 +115,7 @@ $('go').onclick=async()=>{
       encPriv=me.encPriv;const e=JSON.parse(encPriv);
       priv=new TextDecoder().decode(await crypto.subtle.decrypt({name:'AES-GCM',iv:unb64(e.iv)},wk,unb64(e.ct)));
     }
-    window.caches&&caches.delete('lynko-api-v2');
+    window.caches&&caches.delete('lynko-api-v2');try{indexedDB.deleteDatabase('lynko-offline')}catch{}
     // the key is kept ENCRYPTED on the phone; the unlocked copy lives only for this app session
     localStorage.removeItem('lynko_priv');localStorage.setItem('lynko_enc',encPriv);localStorage.setItem('lynko_ident',id);
     localStorage.setItem('lynko_id',me.id);localStorage.setItem('lynko_name',me.username||name);sessionStorage.setItem('lynko_priv',priv);
