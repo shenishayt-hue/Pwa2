@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
 <meta name="theme-color" content="#1a0713">
 <title>LYNKO CHAT</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -10,7 +10,7 @@
 <link rel="preconnect" href="https://js.pusher.com" crossorigin><script async id="pjs" src="https://js.pusher.com/8.2.0/pusher.min.js"></script>
 <style>
 :root{--rose:#ff5c8a;--peach:#ffb38a;--lilac:#b28cff;--txt:#fff0f5;--mut:#d6a6ba;--line:rgba(255,255,255,.12);--panel:#240b1d}
-*{box-sizing:border-box;margin:0;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+*{box-sizing:border-box;margin:0;-webkit-tap-highlight-color:transparent;touch-action:pan-x pan-y}
 [hidden]{display:none!important}
 html,body{height:100%;width:100%;overflow:hidden;overscroll-behavior:none}
 body{position:fixed;top:0;left:0}
@@ -96,8 +96,8 @@ input:focus{border-color:var(--rose)}
 .mb.ok .play,.mb.ld .play,.mb.ok .dur,.mb.bad .play{display:none}
 .mb.bad::after{content:'Tap to retry';position:absolute;top:0;right:0;bottom:0;left:0;display:grid;place-items:center;background:#0008;font-size:13px}
 .comp{display:flex;gap:8px;align-items:flex-end;padding:8px 8px calc(8px + env(safe-area-inset-bottom));background:#1d0817}
-.pill{flex:1;display:flex;align-items:flex-end;background:#33152a;border-radius:24px;border:1px solid var(--line)}
-.pill textarea{flex:1;border:0;background:none;resize:none;max-height:120px;padding:12px 6px;line-height:1.3;border-radius:0}
+.pill{flex:1;min-width:0;display:flex;align-items:flex-end;background:#33152a;border-radius:24px;border:1px solid var(--line)}
+.pill textarea{flex:1;min-width:0;width:0;border:0;background:none;resize:none;max-height:120px;padding:12px 6px;line-height:1.3;border-radius:0}
 .ib{width:44px;height:46px;font-size:21px;flex:none}
 .send{width:48px;height:48px;border-radius:50%;font-size:20px;flex:none;background:linear-gradient(135deg,var(--rose),#c14bff);box-shadow:0 6px 18px rgba(255,92,138,.4)}
 .attm{position:absolute;left:10px;bottom:70px;z-index:5;background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:10px;display:flex;gap:14px}
@@ -129,6 +129,13 @@ input:focus{border-color:var(--rose)}
 .ring.un,.ring.mine{background:linear-gradient(135deg,var(--peach),var(--rose) 55%,var(--lilac))}.ring.none{background:none}
 .ring .av{border:2px solid #1d0817;box-sizing:content-box}
 .ring .plus{position:absolute;right:-2px;bottom:-2px;width:22px;height:22px;border-radius:50%;background:linear-gradient(135deg,var(--rose),#c14bff);display:grid;place-items:center;font-weight:700;border:2px solid #1d0817;font-size:15px;line-height:1}
+.upp{position:absolute;top:6px;right:8px;background:#000b;border-radius:10px;padding:2px 8px;font-size:12px;z-index:2}.upp:empty{display:none}.row{touch-action:pan-y}.tr-t{white-space:pre-wrap;line-height:1.5;margin:10px 0 14px;font-size:17px}
+.comp{gap:8px;padding:8px 8px calc(8px + env(safe-area-inset-bottom))}
+.pill{border-radius:26px;padding:0 6px 0 2px;align-items:flex-end;background:rgba(255,255,255,.09);border-color:rgba(255,255,255,.08)}
+.pill textarea{padding:14px 6px}
+.pill .ib{width:40px;height:50px;display:grid;place-items:center;color:#d9b3c4}.pill .ib svg{width:23px;height:23px}
+#emoBtn,#stkBtn{width:38px!important;height:50px!important;display:grid;place-items:center;color:#d9b3c4}#emoBtn svg,#stkBtn svg{width:24px;height:24px}
+.comp .send{width:50px;height:50px;display:grid;place-items:center;padding:0}.comp .send svg{width:24px;height:24px;margin-left:2px}
 .rpb{display:flex;align-items:center;gap:8px;padding:6px 12px;background:#2a0f22;border-top:1px solid var(--line)}.rpb[hidden]{display:none}.rpb>div{flex:1;min-width:0;border-left:3px solid var(--peach);padding-left:8px}.rpb b{display:block;color:var(--peach);font-size:12.5px}.rpb span{display:block;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:13.5px}.rpb button{width:32px;height:32px;border-radius:50%;background:#0006;flex:none}.row .b{transition:box-shadow .3s}.row.hl .b{box-shadow:0 0 0 2px var(--peach)}.qt{cursor:pointer}
 .qt{display:flex;gap:8px;align-items:center;background:rgba(0,0,0,.25);border-left:3px solid var(--peach);border-radius:8px;padding:5px 8px;margin-bottom:5px;font-size:13.5px;overflow:hidden}
 .qt img{width:40px;height:40px;object-fit:cover;border-radius:6px;flex:none}.qt>div{min-width:0}
@@ -144,6 +151,7 @@ input:focus{border-color:var(--rose)}
 .scn .cont{position:absolute;top:0;right:0;bottom:0;left:0;display:grid;place-items:center}
 .scn .cont img,.scn .cont video{position:absolute;top:0;right:0;bottom:0;left:0;width:100%;height:100%;object-fit:contain}
 .scn .cont.txt{padding:28px;text-align:center;font:600 30px/1.3 'DM Sans',sans-serif;white-space:pre-wrap;word-break:break-word;overflow:auto}
+.scn .spp{position:absolute;top:calc(50% + 34px);left:0;right:0;text-align:center;color:#fffc;font-size:13px}.scn .sfail{display:grid;gap:12px;justify-items:center;color:#fffc}.scn .sfail button{padding:9px 22px;border-radius:20px;background:#fff;color:#1a0713;font-weight:700}
 .scn .ssp{position:absolute;top:0;right:0;bottom:0;left:0;margin:auto;width:38px;height:38px;border:3px solid #fff5;border-top-color:#fff;border-radius:50%;animation:spin .8s linear infinite}
 .scap{position:absolute;left:0;right:0;bottom:0;padding:44px 18px 14px;text-align:center;background:linear-gradient(transparent,#000b);font-size:16px;white-space:pre-wrap;word-break:break-word;pointer-events:none}
 .sft{flex:none;z-index:3;padding:8px 10px calc(10px + env(safe-area-inset-bottom));background:#000}
@@ -237,7 +245,7 @@ input:-webkit-autofill,textarea:-webkit-autofill{-webkit-box-shadow:0 0 0 100px 
 <meta name="apple-mobile-web-app-title" content="LYNKO CHAT">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="icon" href="/icons/icon-192.png">
-<script src="/offline.js?v={{V}}"></script><script>window.OFF=window.OFF||{ok:function(){return false},read:function(){return Promise.resolve()},save:function(){},net:function(){},warm:function(){},onBack:function(){},addMsg:function(){return Promise.resolve()},delMsg:function(){return Promise.resolve()},wipe:function(){},online:true}</script><script src="/install.js?v={{V}}" defer></script><script src="/heal.js?v={{V}}" defer></script><script src="/smooth.js?v={{V}}" defer></script>
+<script src="/offline.js?v={{V}}"></script><script>window.OFF=window.OFF||{ok:function(){return false},read:function(){return Promise.resolve()},save:function(){},net:function(){},warm:function(){},onBack:function(){},addMsg:function(){return Promise.resolve()},delMsg:function(){return Promise.resolve()},wipe:function(){},online:true}</script><script src="/install.js?v={{V}}" defer></script><script src="/heal.js?v={{V}}" defer></script><script src="/smooth.js?v={{V}}" defer></script><script src="/theme.js?v={{V}}" defer></script>
 <script>(function(){var vv=window.visualViewport,f=function(){document.documentElement.style.setProperty('--vh',((vv?vv.height:window.innerHeight)*0.01)+'px');if(scrollY||scrollX)scrollTo(0,0)};f();
 addEventListener('resize',f);addEventListener('orientationchange',function(){setTimeout(f,150)});addEventListener('scroll',function(){if(scrollY||scrollX)scrollTo(0,0)},{passive:true});
 if(vv){vv.addEventListener('resize',f);vv.addEventListener('scroll',f)}document.addEventListener('focusout',function(){setTimeout(f,80)})})()</script>
@@ -264,8 +272,9 @@ if(vv){vv.addEventListener('resize',f);vv.addEventListener('scroll',f)}document.
     <div class="attm" id="attm" hidden><button id="gal">🖼<span>Gallery</span></button><button id="cam">📷<span>Camera</span></button></div>
     <div class="rpb" id="rpb" hidden><div><b></b><span></span></div><button id="rpx" type="button" aria-label="Cancel reply">✕</button></div>
     <div class="comp" id="comp" hidden>
-      <div class="pill"><button class="ib" id="att" type="button">📎</button><textarea id="txt" rows="1" placeholder="Message" enterkeyhint="send"></textarea><button class="ib" id="mic" type="button" aria-label="Voice message">🎙</button></div>
-      <button class="send" id="send" type="button">❤</button>
+      <div class="pill"><textarea id="txt" rows="1" placeholder="Message" enterkeyhint="send"></textarea><button class="ib" id="att" type="button" aria-label="Attach"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button><button class="ib" id="camb" type="button" aria-label="Camera"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg></button></div>
+      <button class="send" id="mic" type="button" aria-label="Voice message"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11z"/></svg></button>
+      <button class="send" id="send" type="button" aria-label="Send" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3.4 20.4l17.45-7.48a1 1 0 0 0 0-1.84L3.4 3.6a.99.99 0 0 0-1.35 1.17L4.12 11 12 12l-7.88 1-2.07 6.23a.99.99 0 0 0 1.35 1.17z"/></svg></button>
     </div>
     <div class="rec" id="rec" hidden><button class="ic" id="rcx" type="button" aria-label="Cancel">🗑</button><i class="rd"></i><span class="rt" id="rct">0:00</span><span class="rh">Recording… tap ➤ to send</span><button class="send" id="rcs" type="button" aria-label="Send voice message">➤</button></div>
   </section>
@@ -471,7 +480,7 @@ function renderList(){
     const h=document.createElement('div');h.innerHTML=`<div class="hero"><i>♥</i><h2>Welcome to Lynko</h2><p>Share your ID with someone special, or add theirs, to start a private chat. Everything disappears after 24 hours.</p><div class="idbox" id="hid">Your ID — tap to copy<b>${me.id}</b></div><button class="btn p" id="hgo">Add your first contact</button></div>`;
     l.appendChild(h.firstChild);
     $('hid').onclick=()=>{navigator.clipboard?.writeText(me.id);toast('ID copied')};$('hgo').onclick=addContact;return}
-  const arr=[...contacts.values()].sort((a,b)=>(chats.get(b.id)?.m.ts||'').localeCompare(chats.get(a.id)?.m.ts||''))
+  const arr=[...contacts.values()].sort((a,b)=>(pinned(b.id)-pinned(a.id))||(chats.get(b.id)?.m.ts||'').localeCompare(chats.get(a.id)?.m.ts||''))
     .filter(c=>{const L=LOCK.chat.has(c.id),m=c.username.toLowerCase().includes(qs);return flt=='locked'?L&&m:!L&&m&&(flt=='all'||(flt=='unread'&&chats.get(c.id)?.unread))});
   const lockRow=flt=='all'&&!qs&&LOCK.chat.count()>0&&!LOCK.chat.hidden();if(lockRow)l.insertBefore(LOCK.chat.row(),l.children[(showOff?1:0)+(showAi?1:0)]||null);
   if(!arr.length){if(!showOff&&!showAi&&!lockRow)l.innerHTML='<div class="empty">No chats found</div>';return}
@@ -480,7 +489,7 @@ function renderList(){
     const ch=chats.get(c.id),locked=false,b=document.createElement('button');
     b.className='item'+(c.id==cur?' on':'');
     b.innerHTML=`${av(c)}<div class="n"><div class="r1"><b></b><time></time></div><div class="r2"><span class="pv"></span><i class="badge"></i></div></div>`;
-    b.querySelector('b').textContent=c.username;if(c.bot)b.querySelector('b').insertAdjacentHTML('beforeend','<i class="tag">BOT</i>');
+    b.querySelector('b').textContent=c.username;if(c.bot)b.querySelector('b').insertAdjacentHTML('beforeend','<i class="tag">BOT</i>');if(pinned(c.id))b.querySelector('b').insertAdjacentText('beforeend',' 📌');
     const pv=b.querySelector('.pv');
     if(typingT[c.id]){pv.textContent='typing…';pv.classList.add('ty')}
     else pv.textContent=locked?'🔒 Locked chat':ch?(ch.txt):(c.about||'Say hi ♥');
@@ -624,8 +633,16 @@ function paint(m,p,into){
   else{b.classList.add('med');b.appendChild(mediaBox(m,p,b));if(p.cap){const t=document.createElement('div');t.className='tx';t.textContent=p.cap;b.appendChild(t)}}
   const mt=document.createElement('span');mt.className='meta';mt.innerHTML='<time></time>'+(mine?'<i class="tk"></i>':'');mt.firstChild.textContent=hm(m.ts);b.appendChild(mt);
   b.insertAdjacentHTML('beforeend','<span class="rxp" hidden></span>');
-  press(b,()=>menu(m.id));b.ondblclick=()=>react(m.id,'❤️',b);
+  press(b,()=>menu(m.id));b.ondblclick=()=>react(m.id,'❤️',b);swipeReply(r);
   tickEl(r);rxEl(r);box.appendChild(r);if(!into&&(near||mine))scrollEnd()}
+function swipeReply(r){let x0=0,y0=0,dx=0,on=0,lk=0;
+  r.addEventListener('pointerdown',e=>{if(e.pointerType=='mouse')return;x0=e.clientX;y0=e.clientY;dx=0;on=1;lk=0},{passive:true});
+  r.addEventListener('pointermove',e=>{if(!on)return;const mx=e.clientX-x0,my=e.clientY-y0;
+    if(!lk){if(Math.abs(my)>12){on=0;return}if(mx>14&&Math.abs(my)<10)lk=1;else return}
+    dx=Math.max(0,Math.min(84,mx));r.style.transform='translateX('+dx+'px)'},{passive:true});
+  const end=()=>{if(!on&&!dx)return;on=0;r.style.transition='transform .18s';r.style.transform='';setTimeout(()=>{r.style.transition=''},220);
+    if(dx>=64&&r._m&&cur!='ai'&&cur!='official'){navigator.vibrate?.(12);setReply(r._m.id)}dx=0};
+  ['pointerup','pointercancel'].forEach(ev=>r.addEventListener(ev,end))}
 async function addMsg(m,live){
   if(seen.has(m.id))return;seen.add(m.id);
   const p=await payload(m);if(m.from==me.id?m.to!=cur:m.from!=cur){seen.delete(m.id);return}   // chat changed while decrypting
@@ -644,6 +661,8 @@ function menu(id){
   o.querySelectorAll('.emo button').forEach(b=>b.onclick=()=>{o.remove();react(id,b.textContent,$('m'+id))});
   const act=o.querySelector('.act'),add=(t,f)=>{const b=document.createElement('button');b.className='mi';b.textContent=t;b.onclick=()=>{o.remove();f()};act.appendChild(b)};
   if(cur!='ai'&&cur!='official')add('Reply',()=>setReply(id));
+  if(cur!='ai'&&cur!='official'&&!p.st)add('Forward',()=>forwardMsg(id));
+  if(p.k=='text'&&!p.st&&p.v&&window.F&&F.cfgAi&&F.cfgAi())add('🌐 Translate (AI)',()=>translateMsg(id));
   if((p.k=='text'&&!p.st)||p.cap)add('Copy',()=>copyText(p.k=='text'?p.v:p.cap));
   if(mine)add('Delete for everyone',async()=>{if(await ask('Delete this message for everyone?',{ok:'Delete'}))api('/api/messages/'+id,'DELETE').catch(e=>toast(e.message))});
   document.body.appendChild(o)}
@@ -653,10 +672,13 @@ async function react(id,e,el){
   try{const d=await api('/api/react','POST',{id,e});setRx(id,d.rx);if(d.rx[me.id]=='❤️'){const r=(el||$('m'+id))?.getBoundingClientRect();burst(r?r.left+r.width/2:undefined,r?r.top:undefined)}}catch(x){toast(x.message)}}
 
 // ── sending: instant bubble first, network after ──
-async function upMedia(bytes){
-  let r;try{r=await fetch('/api/media',{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:bytes})}catch{OFF.net(false);const x=new Error('No internet');x.net=true;throw x}
-  if(r.status==401){leave();throw new Error('auth')}
-  const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'Upload failed');return d.key}
+function upMedia(bytes,onp){return new Promise((res,rej)=>{
+  const x=new XMLHttpRequest();x.open('POST','/api/media');x.setRequestHeader('Content-Type','application/octet-stream');
+  x.upload.onprogress=e=>{if(onp&&e.lengthComputable)onp(e.loaded/e.total)};
+  x.onload=()=>{if(x.status==401){leave();return rej(new Error('auth'))}let d={};try{d=JSON.parse(x.responseText)}catch{}
+    if(x.status>=200&&x.status<300&&d.key)res(d.key);else rej(new Error(d.error||'Upload failed'))};
+  x.onerror=x.ontimeout=()=>{OFF.net(false);const e=new Error('No internet');e.net=true;rej(e)};
+  x.send(bytes)})}
 const outbox=[];let flushing=0;
 async function flushOutbox(){if(flushing||!outbox.length||!navigator.onLine)return;flushing=1;
   try{while(outbox.length){const f=outbox[0];try{await f();outbox.shift()}catch(e){if(e&&e.net)break;outbox.shift()}}}finally{flushing=0}}
@@ -665,11 +687,12 @@ async function deliver(kind,p,bytes,local,to){
   const peer=to||cur,show=peer==cur,m={id:'t'+Math.random().toString(36).slice(2,8)+(++tc),from:me.id,to:peer,kind,ts:new Date().toISOString(),media:kind!='text',rx:{},r:false,pending:true};
   const drop=()=>{const i=msgs.indexOf(m);if(i>-1)msgs.splice(i,1)};
   pl.set(m.id,p);if(local)urls[m.id]=local;seen.add(m.id);if(show){msgs.push(m);paint(m,p)}
+  const prog=f=>{const b=$('m'+m.id)?.querySelector('.b');if(!b)return;let u=b.querySelector('.upp');if(!u){u=document.createElement('span');u.className='upp';b.appendChild(u)}u.textContent=f>=1?'':'⬆ '+Math.round(f*100)+'%'};
   let sealed=null,bkey=null;   // survive a retry: encrypt once, upload once
   const go=async()=>{
     if(!sealed)sealed=await seal(peer,enc.encode(JSON.stringify(p)));
     const body={to:peer,kind,iv:sealed.iv,ct:b64(sealed.ct),tmp:m.id};
-    if(bytes){if(!bkey){const sb=await seal(peer,bytes);bkey={iv:sb.iv,key:await upMedia(sb.ct)}}body.bIv=bkey.iv;body.bkey=bkey.key}   // encrypted file goes to the bucket, never to Mongo
+    if(bytes){if(!bkey){const sb=await seal(peer,bytes);bkey={iv:sb.iv,key:await upMedia(sb.ct,prog)};$('m'+m.id)?.querySelector('.upp')?.remove()}body.bIv=bkey.iv;body.bkey=bkey.key}   // encrypted file goes to the bucket, never to Mongo
     const real=await api('/api/messages','POST',body),el=$('m'+m.id);
     pl.set(real.id,p);if(urls[m.id])urls[real.id]=urls[m.id];
     if(seen.has(real.id)){el?.remove();drop()}
@@ -680,6 +703,34 @@ async function deliver(kind,p,bytes,local,to){
     if(e&&e.net){outbox.push(go);if(!deliver._t||Date.now()-deliver._t>4000){deliver._t=Date.now();toast('Waiting for internet — it will send by itself')}return}   // bubble stays with the clock icon
     $('m'+m.id)?.remove();drop();seen.delete(m.id);toast('Not sent: '+e.message)}
 }
+async function mediaBytes(m){const peer=m.from==me.id?m.to:m.from,r=await fetch('/api/blob/'+m.id);if(!r.ok)throw 0;return open(peer,r.headers.get('X-IV'),await r.arrayBuffer())}
+function forwardMsg(id){
+  const m=msgs.find(x=>x.id==id),p=pl.get(id);if(!m||!p||m.pending)return;
+  const list=[...contacts.values()].filter(c=>!c.bot&&c.id!=cur);if(!list.length)return toast('No other contacts to forward to');
+  const o=sheet('<h3 style="margin-bottom:6px">Forward to…</h3><div class="fwl"></div>');
+  list.forEach(c=>{const b=document.createElement('button');b.className='mi';b.textContent=c.username;b.onclick=async()=>{o.remove();
+    try{if(p.k=='text')deliver('text',{k:'text',v:p.v},null,null,c.id);
+      else{toast('Forwarding…');const bytes=await mediaBytes(m);deliver(p.k,{...p,fwd:1},bytes,urls[m.id]||null,c.id)}
+      toast('Forwarded to '+c.username)}catch{toast('Couldn’t forward')}};o.querySelector('.fwl').appendChild(b)})}
+async function translateMsg(id){
+  const p=pl.get(id);if(!p||p.k!='text'||!p.v)return;
+  if(!await ask('Translate with AI? This message is sent to the AI service and is not end-to-end encrypted.',{ok:'Translate'}))return;
+  toast('Translating…');
+  try{const r=await fetch('/api/ai',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:[{role:'user',content:'Translate this chat message. If it is Sinhala or Singlish translate it to English, otherwise translate it to Sinhala. Reply with ONLY the translation, nothing else.\n\n'+String(p.v).slice(0,1500)}]})});
+    if(!r.ok)throw 0;const t=(await r.text()).trim();if(!t)throw 0;
+    const o=sheet('<h3>Translation</h3><p class="tr-t"></p><button class="btn p" id="trc" style="width:100%">Copy</button>');o.querySelector('.tr-t').textContent=t;o.querySelector('#trc').onclick=()=>{copyText(t);o.remove()}}
+  catch{toast('Translation failed')}}
+const pinKey=()=>'lk_pin:'+me.id,pins=()=>{try{return new Set(JSON.parse(localStorage.getItem(pinKey())||'[]'))}catch{return new Set()}},pinned=id=>pins().has(id);
+function togglePin(id){const s=pins();if(s.has(id))s.delete(id);else{if(s.size>=3)return toast('You can pin up to 3 chats');s.add(id)}
+  try{localStorage.setItem(pinKey(),JSON.stringify([...s]))}catch{}toast(s.has(id)?'Chat pinned 📌':'Chat unpinned');renderList()}
+function searchChat(){
+  const o=sheet('<h3 style="margin-bottom:8px">Search in chat</h3><input id="scq" placeholder="Search messages…" style="width:100%"><div id="scr" style="max-height:50vh;max-height:50dvh;overflow:auto;margin-top:8px"></div>');
+  const q=o.querySelector('#scq'),r=o.querySelector('#scr');q.focus();
+  q.oninput=()=>{const t=q.value.trim().toLowerCase();r.innerHTML='';if(!t)return;
+    const hits=msgs.filter(m=>{const p=pl.get(m.id);return p&&((p.k=='text'&&!p.st&&String(p.v).toLowerCase().includes(t))||(p.cap&&String(p.cap).toLowerCase().includes(t)))}).slice(-30).reverse();
+    if(!hits.length){r.innerHTML='<div class="empty" style="padding:20px">No messages found</div>';return}
+    hits.forEach(m=>{const p=pl.get(m.id),b=document.createElement('button');b.className='mi';b.textContent=(m.from==me.id?'You: ':'')+String(p.k=='text'?p.v:p.cap).slice(0,80);
+      b.onclick=()=>{o.remove();const el=$('m'+m.id);if(el){el.scrollIntoView({block:'center',behavior:'smooth'});el.classList.add('hl');setTimeout(()=>el.classList.remove('hl'),1500)}};r.appendChild(b)})}}
 let rpl=null;
 function setReply(id){const m=msgs.find(x=>x.id==id),p=pl.get(id);if(!m||!p||m.pending)return;
   const who=m.from==me.id?'You':((contacts.get(m.from)||{}).username||''),
@@ -691,8 +742,8 @@ $('rpx').onclick=clearReply;
 function sendText(){
   if(!cur)return;if(cur=='ai')return F.aiSend($('txt').value);F.typingStop();const v=$('txt').value.trim(),t=v||'❤️';$('txt').value='';grow();
   if(!v||love({k:'text',v:t}))burst();deliver('text',rpl?{k:'text',v:t,re:{k:'text',t:rpl.t,who:rpl.who,mid:rpl.mid,th:rpl.th}}:{k:'text',v:t});clearReply();$('txt').focus({preventScroll:true})}
-function grow(){const t=$('txt');t.style.height='auto';t.style.height=Math.min(t.scrollHeight,120)+'px';$('send').textContent=t.value.trim()?'➤':'❤';micVis()}
-function micVis(){const m=$('mic');if(m)m.hidden=cur=='ai'||cur=='official'||!!(contacts.get(cur)&&contacts.get(cur).bot)||!!$('txt').value.trim()}
+function grow(){const t=$('txt');t.style.height='auto';t.style.height=Math.min(t.scrollHeight,120)+'px';micVis()}
+function micVis(){const m=$('mic');if(!m)return;m.hidden=cur=='ai'||cur=='official'||!!(contacts.get(cur)&&contacts.get(cur).bot)||!!$('txt').value.trim();$('send').hidden=!m.hidden}
 $('send').addEventListener('pointerdown',e=>e.preventDefault());   // keeps the keyboard open
 $('send').onclick=sendText;
 $('txt').addEventListener('input',()=>{grow();F.typingInput()});
@@ -751,6 +802,7 @@ function pickMedia(f,mode='chat'){
     const p={k,mime:r.blob.type||f.type,w:r.w,h:r.h,d:r.d,th:r.th,cap,size:r.blob.size},bytes=await r.blob.arrayBuffer();
     if(mode=='status')return doPost(p,bytes);
     deliver(k,p,bytes,URL.createObjectURL(r.blob))}}
+$('camb').onclick=e=>{e.stopPropagation();$('fc').click()};
 $('att').onclick=e=>{e.stopPropagation();$('attm').hidden=!$('attm').hidden};
 document.addEventListener('click',()=>{$('attm').hidden=true});
 $('gal').onclick=()=>$('fg').click();$('cam').onclick=()=>$('fc').click();
@@ -771,7 +823,7 @@ async function loadStatuses(){
     if(!c){const raw=await open(s.from,s.wk.iv,unb64(s.wk.ct)),k=await crypto.subtle.importKey('raw',raw,'AES-GCM',false,['encrypt','decrypt']);
       const p=JSON.parse(dec.decode(await crypto.subtle.decrypt({name:'AES-GCM',iv:unb64(s.iv)},k,unb64(s.ct))));c={k,p};stc.set(s.id,c)}
     out.push({...s,k:c.k,p:c.p})}catch{}}));
-  out.sort((a,b)=>a.ts.localeCompare(b.ts));sts=out;updDot();if(tab=='status')renderStatus()}
+  out.sort((a,b)=>a.ts.localeCompare(b.ts));sts=out;updDot();if(tab=='status')renderStatus();warmStatuses()}
 const updDot=()=>{$('sdot').hidden=!sts.some(s=>s.from!=me.id&&!s.seen)};
 async function postStatus(p,bytes){
   const raw=crypto.getRandomValues(new Uint8Array(32)),k=await crypto.subtle.importKey('raw',raw,'AES-GCM',false,['encrypt']),iv=crypto.getRandomValues(new Uint8Array(12));
@@ -782,12 +834,35 @@ async function postStatus(p,bytes){
 async function doPost(p,bytes){
   if(posting)return toast('Still posting…');posting=1;toast('Posting status…');
   try{await postStatus(p,bytes);toast('Status posted ♥');await loadStatuses()}catch(e){toast('Not posted: '+e.message)}finally{posting=0}}
-async function statusMedia(s){
-  const id='s'+s.id;if(urls[id])return urls[id];
-  const r=await fetch('/api/status/'+s.id+'/blob');if(!r.ok)throw 0;
-  const buf=await crypto.subtle.decrypt({name:'AES-GCM',iv:unb64(s.bIv)},s.k,await r.arrayBuffer());
-  const mime=/^(image|video)\/[\w.+-]+$/.test(s.p.mime||'')?s.p.mime:(s.p.k=='img'?'image/jpeg':'video/mp4');
-  return urls[id]=URL.createObjectURL(new Blob([buf],{type:mime}))}
+const smp=new Map();
+function statusMedia(s,onp){
+  const id='s'+s.id;if(urls[id])return Promise.resolve(urls[id]);
+  let e=smp.get(id);
+  if(!e){e={cbs:new Set()};
+    e.p=(async()=>{
+      let buf=null;
+      for(let a=0;a<3&&!buf;a++){   // 3 tries; each try gives up if no data arrives for 20 s
+        const ac=new AbortController();let tm;const kick=()=>{clearTimeout(tm);tm=setTimeout(()=>ac.abort(),20000)};kick();
+        try{
+          const x=await fetch('/api/status/'+s.id+'/blob',{signal:ac.signal});if(!x.ok)throw 0;
+          const tot=+x.headers.get('Content-Length')||+(s.p&&s.p.size)||0,rd=x.body&&x.body.getReader?x.body.getReader():null;
+          if(rd){const ch=[];let got=0;for(;;){const r=await rd.read();if(r.done)break;ch.push(r.value);got+=r.value.length;kick();if(tot)e.cbs.forEach(f=>f(Math.min(.99,got/tot)))}
+            const u8=new Uint8Array(got);let o=0;for(const c of ch){u8.set(c,o);o+=c.length}buf=u8.buffer}
+          else buf=await x.arrayBuffer();
+        }catch{await new Promise(r=>setTimeout(r,600*(a+1)))}finally{clearTimeout(tm)}
+      }
+      if(!buf)throw 0;
+      const raw=await crypto.subtle.decrypt({name:'AES-GCM',iv:unb64(s.bIv)},s.k,buf);
+      const mime=/^(image|video)\/[\w.+-]+$/.test(s.p.mime||'')?s.p.mime:(s.p.k=='img'?'image/jpeg':'video/mp4');
+      return urls[id]=URL.createObjectURL(new Blob([raw],{type:mime}))})();
+    e.p.catch(()=>{}).finally(()=>smp.delete(id));smp.set(id,e)}
+  if(onp)e.cbs.add(onp);
+  return e.p.finally(()=>onp&&e.cbs.delete(onp))}
+// download other people's unseen statuses in the background so they open instantly (skipped on Data Saver)
+let stWarm=0,svMute=false;
+async function warmStatuses(){
+  if(stWarm||!navigator.onLine||(navigator.connection&&navigator.connection.saveData))return;stWarm=1;
+  try{for(const s of sts){if(s.from==me.id||s.seen||!s.p||s.p.k=='text'||urls['s'+s.id]||(s.p.size||0)>12*1048576)continue;await statusMedia(s).catch(()=>{})}}finally{stWarm=0}}
 
 function srow(c,label,sub,ring,plus,fn){
   const b=document.createElement('button');b.className='item';
@@ -821,7 +896,7 @@ function openViewer(uid,start){
   let i=start!=null?start:Math.max(0,list.findIndex(s=>!s.seen)),ready=false,paused=false,hd=0,ty=0,acc=0,tk=0,el=null,last=performance.now();
   const o=document.createElement('div');o.className='sv';sv=o;
   o.innerHTML=`<div class="spg">${list.map(()=>'<i><b></b></i>').join('')}</div>
-   <div class="shd"><div class="who">${av(c)}</div><div class="tm"><b></b><small></small></div><button class="tr" hidden>🗑</button><button class="cl">✕</button></div>
+   <div class="shd"><div class="who">${av(c)}</div><div class="tm"><b></b><small></small></div><button class="snd" hidden aria-label="Sound">🔊</button><button class="tr" hidden>🗑</button><button class="cl">✕</button></div>
    <div class="scn"></div>
    <div class="sft">${own?'<button class="vws">👁 0</button>':'<div class="rp"><input maxlength="500" placeholder="Reply…" enterkeyhint="send"><button class="hb">❤️</button><button class="send">➤</button></div>'}</div>`;
   document.body.appendChild(o);history.pushState({sv:1},'');
@@ -830,24 +905,27 @@ function openViewer(uid,start){
   const sync=()=>{paused=!!(hd||ty);if(el&&el.tagName=='VIDEO'){paused?el.pause():el.play().catch(()=>{})}};
   const close=(pop)=>{if(!sv)return;clearInterval(timer);el?.pause?.();o.remove();sv=null;if(!pop){skipPop=1;history.back()}updDot();if(tab=='status')renderStatus()};
   o._close=close;
+  const sb=o.querySelector('.snd'),updSnd=()=>{const v=!!el&&el.tagName=='VIDEO';sb.hidden=!v;sb.textContent=svMute?'🔇':'🔊'};
+  sb.onclick=()=>{svMute=!svMute;if(el&&el.tagName=='VIDEO'){el.muted=svMute;if(!svMute)el.play().catch(()=>{})}updSnd()};
   const go=d=>{const n=i+d;if(n>=list.length)return close();show(Math.max(0,n))};
   const timer=setInterval(()=>{const n=performance.now(),dt=n-last;last=n;if(paused||!ready||document.hidden)return;
     let f;if(el&&el.tagName=='VIDEO'&&el.duration)f=el.currentTime/el.duration;else{acc+=dt;f=acc/5000}
     bars[i].style.width=Math.min(100,f*100)+'%';if(f>=1)go(1)},60);
   async function show(n){
-    i=n;const my=++tk,s=list[i];ready=false;acc=0;el=null;scn.innerHTML='';
+    i=n;const my=++tk,s=list[i];ready=false;acc=0;el=null;scn.innerHTML='';updSnd();
     bars.forEach((b,j)=>b.style.width=j<i?'100%':'0');o.querySelector('.tm small').textContent=ago(s.ts);
     const cont=document.createElement('div');cont.className='cont';scn.appendChild(cont);
     if(own){o.querySelector('.tr').hidden=false;o.querySelector('.vws').textContent='👁 '+(s.views||[]).length}
     if(s.p.k=='text'){cont.className='cont txt';cont.style.background=bgOf(s.p.bg);cont.textContent=String(s.p.v||'');ready=true}
     else{
-      cont.innerHTML='<i class="ssp"></i>';
-      try{const u=await statusMedia(s);if(my!=tk)return;cont.innerHTML='';
+      cont.innerHTML='<i class="ssp"></i><span class="spp"></span>';const pp=cont.querySelector('.spp');
+      try{const u=await statusMedia(s,f=>{if(my==tk)pp.textContent=Math.round(f*100)+'%'});if(my!=tk)return;cont.innerHTML='';
         el=document.createElement(s.p.k=='img'?'img':'video');el.src=u;cont.appendChild(el);
-        if(s.p.k=='vid'){el.playsInline=true;el.onended=()=>{if(my==tk)go(1)};el.play().catch(()=>{el.muted=true;el.play().catch(()=>{})})}
+        if(s.p.k=='vid'){el.playsInline=true;el.muted=svMute;el.onended=()=>{if(my==tk)go(1)};
+          el.play().catch(()=>{if(!svMute)toast('Tap 🔇 for sound');svMute=true;el.muted=true;updSnd();el.play().catch(()=>{})});updSnd()}
         if(s.p.cap){const cp=document.createElement('div');cp.className='scap';cp.textContent=String(s.p.cap);scn.appendChild(cp)}
         sync();ready=true}
-      catch{if(my!=tk)return;cont.innerHTML='';cont.textContent='Couldn’t load this status';ready=true}}
+      catch{if(my!=tk)return;cont.innerHTML='<div class="sfail">Couldn’t load this status<button type="button">Retry</button></div>';const rb=cont.querySelector('button');['pointerdown','pointerup','click'].forEach(ev=>rb.addEventListener(ev,x=>x.stopPropagation()));rb.onclick=()=>show(i);ready=false;paused=true}}
     if(!own&&!s.seen){s.seen=true;api('/api/status/'+s.id+'/view','POST').catch(()=>{})}
     const nx=list[i+1];if(nx&&nx.p.k!='text'&&!urls['s'+nx.id])statusMedia(nx).catch(()=>{});   // preload next
   }
@@ -956,10 +1034,10 @@ addEventListener('pageshow',e=>{if(e.persisted&&$('q').value){$('q').value='';qs
 $('q').addEventListener('keydown',e=>{if(e.key=='Enter'){clearTimeout(qT);codeCheck(e.target.value.trim())}});
 document.querySelectorAll('#chips button').forEach(b=>b.onclick=()=>{flt=b.dataset.f;document.querySelectorAll('#chips button').forEach(x=>x.classList.toggle('on',x==b));renderList()});
 $('n1').onclick=()=>{if(tab!='chats')setTab('chats');else $('list').scrollTo({top:0,behavior:'smooth'})};$('n4').onclick=()=>setTab('status');$('n5').onclick=()=>setTab('calls');$('n2').onclick=wallpaper;$('n3').onclick=()=>settings();
-$('menub').onclick=()=>items([['⚙️ Settings',()=>settings()],['👤 Profile & About',profile],['🔔 Notifications',F.notifOn],['🖼 Wallpaper',wallpaper],['➕ Add contact',addContact],['🛠 Fix problems',()=>window.HEAL&&HEAL.run(true)],['⎋ Log out',async()=>{await fetch('/api/logout',{method:'POST'});leave()}]]);
+$('menub').onclick=()=>items([['⚙️ Settings',()=>settings()],['👤 Profile & About',profile],['🔔 Notifications',F.notifOn],['🖼 Wallpaper',wallpaper],['🎨 Theme',()=>window.THEME&&THEME.open()],['➕ Add contact',addContact],['🛠 Fix problems',()=>window.HEAL&&HEAL.run(true)],['⎋ Log out',async()=>{await fetch('/api/logout',{method:'POST'});leave()}]]);
 $('hav').onclick=()=>{if(cur=='official'){const o=sheet(`<div class="pf">${offAv('big')}<h3 style="margin:0">Lynko Official${VF}</h3><p style="color:var(--mut);text-align:center">Official news and updates from the Lynko team.<br>You can’t reply in this channel.</p></div>`);return}const c=contacts.get(cur);if(!c)return;
   LX.contact(c,{avatar:av(c,'big'),locked:LOCK.chat.has(c.id),rename:()=>renameContact(c.id),lock:()=>LOCK.chat.toggle(c.id),call:()=>F.callStart(c.id)})};
-$('hmenu').onclick=()=>cur=='ai'?items([['🖼 Wallpaper',wallpaper],['🧹 Clear AI chat',F.aiClear]]):cur=='official'?items([['🖼 Wallpaper',wallpaper]]):items([['✏️ Rename contact',()=>renameContact(cur)],['🖼 Wallpaper',wallpaper],[LOCK.chat.has(cur)?'🔓 Unlock this chat':'🔒 Lock this chat',()=>LOCK.chat.toggle(cur)]]);
+$('hmenu').onclick=()=>cur=='ai'?items([['🖼 Wallpaper',wallpaper],['🧹 Clear AI chat',F.aiClear]]):cur=='official'?items([['🖼 Wallpaper',wallpaper]]):items([['✏️ Rename contact',()=>renameContact(cur)],[pinned(cur)?'📌 Unpin chat':'📌 Pin chat',()=>togglePin(cur)],['🔍 Search in chat',searchChat],['🖼 Wallpaper',wallpaper],[LOCK.chat.has(cur)?'🔓 Unlock this chat':'🔒 Lock this chat',()=>LOCK.chat.toggle(cur)]]);
 document.addEventListener('visibilitychange',()=>{
   if(document.hidden)recCancel();
   if(document.hidden&&cur&&LOCK.chat.has(cur)){closeChat()}
