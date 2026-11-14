@@ -1,4 +1,4 @@
-// LYNKO CHAT — offline store.
+// LYNKO CHAT — offline  store.
 // Every chat list / message list the app loads (and every message that arrives live) is saved on the phone in IndexedDB.
 // Offline = the saved copy is shown exactly like normal. Everything saved is the same ENCRYPTED data the server sends
 // (the key never leaves the phone) and it is wiped on logout. Messages older than 24 h are dropped, like on the server.
