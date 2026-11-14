@@ -67,7 +67,7 @@ $('lkgo').onclick = unlock; $('lkp').addEventListener('keydown', e => { if (e.ke
 $('lkout').onclick = async () => {
   if (!confirm('Log out of this phone? You will need your password to log in again.')) return;
   try { await fetch('/api/logout', { method: 'POST' }) } catch {}
-  localStorage.removeItem('lynko_enc'); localStorage.removeItem('lynko_priv'); sessionStorage.clear(); try { await caches.delete('lynko-api-v2') } catch {} location.href = '/';
+  localStorage.removeItem('lynko_enc'); localStorage.removeItem('lynko_priv'); sessionStorage.clear(); try { await caches.delete('lynko-api-v2') } catch {} try { window.OFF && OFF.wipe() } catch {} location.href = '/';
 };
 
 // first load: no unlocked key in this session = the app was closed -> ask for the password
