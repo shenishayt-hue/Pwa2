@@ -4,7 +4,7 @@
   const mem = navigator.deviceMemory || 4, cores = navigator.hardwareConcurrency || 4, c = navigator.connection || {};
   if (mem <= 2 || (cores <= 4 && mem <= 3) || c.saveData || matchMedia('(prefers-reduced-motion: reduce)').matches) d.classList.add('lite');
   const st = document.createElement('style');
-  st.textContent = '.lite *,.lite *::before,.lite *::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important}.lite .bh{display:none!important}'
+  st.textContent = '.lite *,.lite *::before,.lite *::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important}.lite .bh{display:none!important}.lite .ssp,.lite .sp{animation-duration:.8s!important;animation-iteration-count:infinite!important}'
     + 'input,textarea,select{font-size:max(16px,1em)}'      // iOS/Android never zoom into a field
     + '.msgs{overflow-anchor:auto;-webkit-overflow-scrolling:touch}';
   document.head.appendChild(st);
@@ -23,6 +23,12 @@
 
   // the typing box: sensible mobile keyboard
   const t = txt(); if (t) { t.setAttribute('autocomplete', 'off'); t.setAttribute('autocorrect', 'on'); t.setAttribute('autocapitalize', 'sentences'); t.setAttribute('inputmode', 'text') }
+
+  // no zoom at all (pinch, double-tap, Ctrl+wheel / Ctrl +/-): the app always keeps its size
+  ['gesturestart', 'gesturechange', 'gestureend'].forEach(ev => document.addEventListener(ev, e => e.preventDefault(), { passive: false }));
+  document.addEventListener('touchmove', e => { if (e.touches.length > 1 || (e.scale && e.scale !== 1)) e.preventDefault() }, { passive: false });
+  document.addEventListener('wheel', e => { if (e.ctrlKey) e.preventDefault() }, { passive: false });
+  document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && ['+', '-', '=', '0'].includes(e.key)) e.preventDefault() });
 
   // buttons feel instant (no 300 ms wait, no accidental text selection)
   document.addEventListener('touchstart', () => {}, { passive: true });
