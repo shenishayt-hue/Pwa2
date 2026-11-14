@@ -35,7 +35,7 @@ app.use((q, r, n) => {
   if (q.secure) r.set('Strict-Transport-Security', 'max-age=15552000; includeSubDomains');
   n();
 });
-app.use(compression({ filter: (q, r) => !q.path.startsWith('/api/blob') && !q.path.startsWith('/api/ai') && compression.filter(q, r) }));
+app.use(compression({ filter: (q, r) => !q.path.startsWith('/api/blob') && !q.path.startsWith('/api/ai') && !/^\/api\/status\/[^/]+\/blob/.test(q.path) && compression.filter(q, r) }));
 app.use(express.json({ limit: '1mb' }));   // media no longer travels as JSON
 app.use(express.urlencoded({ extended: false }));
 
