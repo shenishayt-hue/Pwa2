@@ -25,7 +25,7 @@
       '#emoG p{grid-column:1/-1;text-align:center;color:#d6a6ba;font-size:13px;margin-top:70px}';
     document.head.appendChild(st);
     const b = document.createElement('button');
-    b.id = 'emoBtn'; b.type = 'button'; b.textContent = '😊'; b.setAttribute('aria-label', 'Emoji');
+    b.id = 'emoBtn'; b.type = 'button'; b.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9.5"/><path d="M8 14.2c1 1.6 2.4 2.4 4 2.4s3-.8 4-2.4"/><circle cx="9" cy="9.6" r="1" fill="currentColor" stroke="none"/><circle cx="15" cy="9.6" r="1" fill="currentColor" stroke="none"/></svg>'; b.setAttribute('aria-label', 'Emoji');
     pill.insertBefore(b, txt);
     const p = document.createElement('div'); p.id = 'emoP'; p.hidden = true;
     p.innerHTML = '<div id="emoT"></div><div id="emoG"></div>';
