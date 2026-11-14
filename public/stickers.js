@@ -108,7 +108,7 @@
       '#stkG{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:10px;height:230px;overflow-y:auto;-webkit-overflow-scrolling:touch}' +
       '#stkG button{background:none;border:0;padding:2px;border-radius:12px;cursor:pointer}#stkG button:active{background:rgba(255,255,255,.14);transform:scale(1.08)}#stkG .stkimg{filter:none}';
     document.head.appendChild(st);
-    const b = document.createElement('button'); b.id = 'stkBtn'; b.type = 'button'; b.textContent = '🧸'; b.setAttribute('aria-label', 'Stickers'); emo.after(b);
+    const b = document.createElement('button'); b.id = 'stkBtn'; b.type = 'button'; b.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 12.5V6a2.5 2.5 0 0 0-2.5-2.5H6A2.5 2.5 0 0 0 3.5 6v12A2.5 2.5 0 0 0 6 20.5h6.5z"/><path d="M20.5 12.5c-4.6 0-8 3.4-8 8"/><circle cx="8.8" cy="9.5" r="1" fill="currentColor" stroke="none"/><circle cx="14.4" cy="9.5" r="1" fill="currentColor" stroke="none"/><path d="M8.6 13.6c.8 1 1.8 1.4 2.8 1.2"/></svg>'; b.setAttribute('aria-label', 'Stickers'); emo.after(b);
     const p = document.createElement('div'); p.id = 'stkP'; p.hidden = true; p.innerHTML = '<div id="stkT"></div><div id="stkG"></div>'; comp.parentNode.insertBefore(p, comp);
     const T = p.querySelector('#stkT'), G = p.querySelector('#stkG'); let on = 0;
     const draw = i => {
