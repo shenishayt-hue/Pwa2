@@ -316,24 +316,27 @@ input:-webkit-autofill,textarea:-webkit-autofill{-webkit-box-shadow:0 0 0 100px 
     } catch { return undefined }
   }
 
-  // ── network state + banner ──
+  // ── network state + banner (a bar at the very top that pushes the app down while offline) ──
   let online = navigator.onLine !== false, bar = null; const back = [];
   function paint() {
+    if (!document.body) return;
     if (!bar) {
       const st = document.createElement('style');
-      st.textContent = '#offbar{position:fixed;left:50%;transform:translate(-50%,-140%);top:calc(46px + env(safe-area-inset-top));z-index:90;background:#3a1230;color:#ffe3ee;border:1px solid rgba(255,255,255,.18);border-radius:20px;padding:7px 14px;font:500 13px/1.2 "DM Sans",system-ui,sans-serif;box-shadow:0 6px 24px #0008;transition:transform .25s ease;pointer-events:none;max-width:92vw;text-align:center}#offbar.on{transform:translate(-50%,0)}';
+      st.textContent = '#offbar{position:fixed;top:0;left:0;right:0;z-index:100002;box-sizing:border-box;height:calc(26px + env(safe-area-inset-top,0px));padding-top:env(safe-area-inset-top,0px);display:flex;align-items:center;justify-content:center;background:#b45309;color:#fff;font:600 12.5px/1 "DM Sans",system-ui,sans-serif;letter-spacing:.2px;transform:translateY(-100%);transition:transform .2s ease;pointer-events:none}'
+        + 'body.off #offbar{transform:none}body.off .app{margin-top:26px;height:calc(var(--vh,1vh)*100 - 26px)}';
       document.head.appendChild(st);
-      bar = document.createElement('div'); bar.id = 'offbar'; bar.textContent = '📴 Offline — showing saved chats'; bar.setAttribute('role', 'status'); document.body.appendChild(bar);
+      bar = document.createElement('div'); bar.id = 'offbar'; bar.setAttribute('role', 'status'); bar.textContent = '📴 You’re offline — showing saved chats & statuses';
+      document.body.insertBefore(bar, document.body.firstChild);
     }
-    bar.classList.toggle('on', !online);
+    document.body.classList.toggle('off', !online);
   }
   function net(v) {
     v = !!v; if (v === online) return; online = v;
-    if (document.body) paint(); else addEventListener('DOMContentLoaded', paint);
+    paint();
     if (v) back.forEach(f => { try { f() } catch {} });
   }
   addEventListener('online', () => net(true)); addEventListener('offline', () => net(false));
-  addEventListener('DOMContentLoaded', () => { if (!online) paint() });
+  addEventListener('DOMContentLoaded', paint);
 
   // ── pre-download small media (photos, voice) so they open offline too ──
   const warmed = new Set(), q = []; let busy = 0;
@@ -470,7 +473,7 @@ const WP=[['Default',''],['Rose','linear-gradient(160deg,#3b0b2c,#8a1650)'],['Su
 function applyWp(){let w;try{w=JSON.parse(localStorage.getItem('wp')||'null')}catch{}
   const v=!w?'':w.t=='img'?`linear-gradient(#0007,#0007),url(${w.v}) center/cover`:w.v;
   v?document.documentElement.style.setProperty('--wp',v):document.documentElement.style.removeProperty('--wp');
-  document.querySelector('.main').style.setProperty('--wp',v||'radial-gradient(900px 700px at 10% 0%,#4a0d33,transparent 60%),#1a0713')}
+  const mn=document.querySelector('.main');v?mn.style.setProperty('--wp',v):mn.style.removeProperty('--wp')}   // no custom wallpaper -> the theme's own wallpaper
 function wallpaper(){
   const o=sheet(`<h3 style="margin-bottom:6px">Wallpaper</h3><div class="wg">${WP.map((w,i)=>`<button data-i="${i}" style="background:${w[1]||'#1a0713'}">${w[0]}</button>`).join('')}</div><button class="btn p" style="width:100%" id="wpg">Choose from gallery</button><input type="file" id="wpf" accept="image/*" hidden>`);
   o.querySelectorAll('.wg button').forEach(b=>b.onclick=()=>{const w=WP[b.dataset.i];w[1]?localStorage.setItem('wp',JSON.stringify({t:'css',v:w[1]})):localStorage.removeItem('wp');applyWp();o.remove()});
@@ -511,7 +514,7 @@ function paintMe(){$('meb').innerHTML=av(me)}
 
 // ── Lynko Official (verified, read-only; plain text from the admin panel) ──
 const VF='<svg class="vf" viewBox="0 0 24 24" aria-label="Verified"><polygon points="12.00,1.00 13.89,2.49 16.21,1.84 17.39,3.93 19.78,4.22 20.07,6.61 22.16,7.79 21.51,10.11 23.00,12.00 21.51,13.89 22.16,16.21 20.07,17.39 19.78,19.78 17.39,20.07 16.21,22.16 13.89,21.51 12.00,23.00 10.11,21.51 7.79,22.16 6.61,20.07 4.22,19.78 3.93,17.39 1.84,16.21 2.49,13.89 1.00,12.00 2.49,10.11 1.84,7.79 3.93,6.61 4.22,4.22 6.61,3.93 7.79,1.84 10.11,2.49" fill="#2f9bff" stroke="#2f9bff" stroke-width="1.4" stroke-linejoin="round"/><path d="M7.6 12.4l3 3 5.8-6.2" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-const offAv=(cls='')=>`<div class="av ${cls}"><img src="/img/official.jpg" alt="" onerror="this.onerror=null;this.src='/icons/icon-192.png'"></div>`;
+const offAv=(cls='')=>`<div class="av ${cls}"><img src="/img/official.jpg${window.LOGOV?'?v='+window.LOGOV:''}" alt="" onerror="this.onerror=null;this.src='/icons/icon-192.png'"></div>`;
 let off={list:[],unread:0};
 function linkify(el,txt){
   txt.split(/(https?:\/\/[^\s<]+)/g).forEach((part,i)=>{
@@ -579,6 +582,7 @@ let qT=null;
 async function codeCheck(t){if(!t||tab!='chats')return;try{if(await LOCK.chat.tryCode(t))openLocked()}catch{}}
 
 function renderList(){
+  if(!me)return;
   const l=$('list');l.innerHTML='';syncChips();let tot=off.unread||0;chats.forEach((c,id)=>{if(!LOCK.chat.has(id))tot+=c.unread||0});
   document.title=(tot?`(${tot}) `:'')+'Lynko';
   if(tab=='status')return renderStatus();
@@ -929,14 +933,21 @@ const bgOf=n=>BG[Math.max(0,Math.min(BG.length-1,parseInt(n)||0))];   // index o
 const safeTh=t=>typeof t=='string'&&/^data:image\/(jpeg|png|webp);base64,[\w+/=]+$/.test(t)?t:'';
 const ago=t=>(new Date(t).toDateString()==new Date().toDateString()?'Today':'Yesterday')+', '+hm(t);
 
-async function loadStatuses(){
-  const d=await api('/api/statuses'),out=[];
+let stLoaded=false,stSig='';
+async function decStatuses(d){
+  const out=[];
   await Promise.all(d.map(async s=>{try{
-    let c=stc.get(s.id);
-    if(!c){const raw=await open(s.from,s.wk.iv,unb64(s.wk.ct)),k=await crypto.subtle.importKey('raw',raw,'AES-GCM',false,['encrypt','decrypt']);
-      const p=JSON.parse(dec.decode(await crypto.subtle.decrypt({name:'AES-GCM',iv:unb64(s.iv)},k,unb64(s.ct))));c={k,p};stc.set(s.id,c)}
-    out.push({...s,k:c.k,p:c.p})}catch{}}));
-  out.sort((a,b)=>a.ts.localeCompare(b.ts));sts=out;updDot();if(tab=='status')renderStatus();warmStatuses()}
+    let x=stc.get(s.id);
+    if(!x){const raw=await open(s.from,s.wk.iv,unb64(s.wk.ct)),k=await crypto.subtle.importKey('raw',raw,'AES-GCM',false,['encrypt','decrypt']);
+      const p=JSON.parse(dec.decode(await crypto.subtle.decrypt({name:'AES-GCM',iv:unb64(s.iv)},k,unb64(s.ct))));x={k,p};stc.set(s.id,x)}
+    out.push({...s,k:x.k,p:x.p})}catch{}}));
+  return out.sort((a,b)=>a.ts.localeCompare(b.ts))}
+async function loadStatuses(){
+  if(!stLoaded){   // show the copy saved on the phone straight away, then refresh from the server
+    const saved=await OFF.read('/api/statuses').catch(()=>undefined);
+    if(Array.isArray(saved)&&saved.length&&!sts.length){sts=await decStatuses(saved);stLoaded=true;updDot();if(tab=='status')renderStatus()}}
+  const out=await decStatuses(await api('/api/statuses')),sig=out.map(s=>s.id+(s.seen?1:0)).join(),first=!stLoaded;
+  stLoaded=true;sts=out;updDot();if((first||sig!==stSig)&&tab=='status')renderStatus();stSig=sig;warmStatuses()}
 const updDot=()=>{$('sdot').hidden=!sts.some(s=>s.from!=me.id&&!s.seen)};
 async function postStatus(p,bytes){
   const raw=crypto.getRandomValues(new Uint8Array(32)),k=await crypto.subtle.importKey('raw',raw,'AES-GCM',false,['encrypt']),iv=crypto.getRandomValues(new Uint8Array(12));
@@ -954,7 +965,7 @@ function statusMedia(s,onp){
   if(!e){e={cbs:new Set()};
     e.p=(async()=>{
       let buf=null;
-      for(let a=0;a<3&&!buf;a++){   // 3 tries; each try gives up if no data arrives for 20 s
+      for(let a=0,n=navigator.onLine?3:1;a<n&&!buf;a++){   // 3 tries online (1 offline: a saved copy answers instantly or never); each try gives up if no data arrives for 20 s
         const ac=new AbortController();let tm;const kick=()=>{clearTimeout(tm);tm=setTimeout(()=>ac.abort(),20000)};kick();
         try{
           const x=await fetch('/api/status/'+s.id+'/blob',{signal:ac.signal});if(!x.ok)throw 0;
@@ -975,7 +986,8 @@ function statusMedia(s,onp){
 let stWarm=0,svMute=false;
 async function warmStatuses(){
   if(stWarm||!navigator.onLine||(navigator.connection&&navigator.connection.saveData))return;stWarm=1;
-  try{for(const s of sts){if(s.from==me.id||s.seen||!s.p||s.p.k=='text'||urls['s'+s.id]||(s.p.size||0)>12*1048576)continue;await statusMedia(s).catch(()=>{})}}finally{stWarm=0}}
+  try{const todo=sts.filter(s=>s.p&&s.p.k!='text'&&!urls['s'+s.id]&&(s.p.size||0)<=12*1048576).sort((a,b)=>(a.seen?1:0)-(b.seen?1:0)||(a.p.size||0)-(b.p.size||0));
+    for(const s of todo){if(!navigator.onLine)break;await statusMedia(s).catch(()=>{})}}finally{stWarm=0}}
 
 function srow(c,label,sub,ring,plus,fn){
   const b=document.createElement('button');b.className='item';
@@ -983,7 +995,9 @@ function srow(c,label,sub,ring,plus,fn){
   b.querySelector('b').textContent=label;b.querySelector('.pv').textContent=sub;b.onclick=fn;
   if(plus)b.querySelector('.plus').onclick=e=>{e.stopPropagation();addStatus()};return b}
 function renderStatus(){
-  const l=$('list');l.innerHTML='';const g=new Map();sts.forEach(s=>{if(!g.has(s.from))g.set(s.from,[]);g.get(s.from).push(s)});
+  if(!me)return;
+  const l=$('list');l.innerHTML='';
+  if(!stLoaded){l.innerHTML='<div class="sk"><i></i><div><b style="width:45%"></b><s></s></div></div>'.repeat(5);return}const g=new Map();sts.forEach(s=>{if(!g.has(s.from))g.set(s.from,[]);g.get(s.from).push(s)});
   const my=g.get(me.id)||[];
   l.appendChild(srow(me,'My status',my.length?my.length+' update'+(my.length>1?'s':'')+' · '+ago(my[my.length-1].ts):'Tap to add a status update',my.length?'mine':'none',1,()=>my.length?openViewer(me.id):addStatus()));
   const oth=[...g].filter(([id])=>id!=me.id&&contacts.has(id)).map(([id,a])=>({id,a,un:a.some(s=>!s.seen),t:a[a.length-1].ts})).sort((x,y)=>y.t.localeCompare(x.t));
@@ -1038,7 +1052,7 @@ function openViewer(uid,start){
           el.play().catch(()=>{if(!svMute)toast('Tap 🔇 for sound');svMute=true;el.muted=true;updSnd();el.play().catch(()=>{})});updSnd()}
         if(s.p.cap){const cp=document.createElement('div');cp.className='scap';cp.textContent=String(s.p.cap);scn.appendChild(cp)}
         sync();ready=true}
-      catch{if(my!=tk)return;cont.innerHTML='<div class="sfail">Couldn’t load this status<button type="button">Retry</button></div>';const rb=cont.querySelector('button');['pointerdown','pointerup','click'].forEach(ev=>rb.addEventListener(ev,x=>x.stopPropagation()));rb.onclick=()=>show(i);ready=false;paused=true}}
+      catch{if(my!=tk)return;cont.innerHTML='<div class="sfail">'+(navigator.onLine?'Couldn’t load this status':'You’re offline — this status wasn’t saved on your phone')+'<button type="button">Retry</button></div>';const rb=cont.querySelector('button');['pointerdown','pointerup','click'].forEach(ev=>rb.addEventListener(ev,x=>x.stopPropagation()));rb.onclick=()=>show(i);ready=false;paused=true}}
     if(!own&&!s.seen){s.seen=true;api('/api/status/'+s.id+'/view','POST').catch(()=>{})}
     const nx=list[i+1];if(nx&&nx.p.k!='text'&&!urls['s'+nx.id])statusMedia(nx).catch(()=>{});   // preload next
   }
@@ -1188,6 +1202,7 @@ document.addEventListener('visibilitychange',()=>{
   oc.bind('omsg',d=>{if(off.list.some(m=>m.id==d.id))return;off.list.push(d);
     if(cur=='official'&&!document.hidden){offBubble(d);scrollEnd();markOffRead()}else{off.unread++;if(cur!='official')navigator.vibrate?.(20)}renderList()});
   oc.bind('odel',()=>loadOfficial().catch(()=>{}));
+  oc.bind('cfg',d=>window.THEME&&THEME.setCfg(d));
   for(const ev of ['status','sview','sdel'])ch.bind(ev,()=>loadStatuses().catch(()=>{}));
   ch.bind('prof',()=>loadContacts().then(()=>{if(cur)setSub()}).catch(()=>{}));
   OFF.onBack(()=>{if(cur)pull().catch(()=>{});loadChats().catch(()=>{}).then(ackAll);loadStatuses().catch(()=>{});loadOfficial().catch(()=>{})});
@@ -1204,10 +1219,12 @@ document.addEventListener('visibilitychange',()=>{
   const poll=()=>setTimeout(async()=>{
     try{if(!document.hidden&&navigator.onLine!==false){
       tick++;const fast=!rtOK(),chat=cur&&cur!='ai'&&cur!='official';
-      if(chat)await pull().catch(()=>{});
-      if(tick%(fast?2:3)==0)await loadChats().catch(()=>{}).then(ackAll);
-      if(chat&&tick%(fast?4:8)==0)await syncFull().catch(()=>{})}}
-    finally{poll()}},rtOK()?20000:3500);
+      if(chat)await pull().catch(()=>{});                                          // open chat: every 1 s
+      if(tick%(fast?3:5)==0)await loadChats().catch(()=>{}).then(ackAll);          // chat list: every 3 s
+      if(tick%(fast?3:5)==1)await loadStatuses().catch(()=>{});                    // statuses: every 3 s
+      if(tick%(fast?15:30)==2)loadOfficial().catch(()=>{});
+      if(chat&&tick%(fast?10:30)==5)await syncFull().catch(()=>{})}}               // ticks / reactions / deletions
+    finally{poll()}},rtOK()?4000:1000);
   poll();
   addEventListener('focus',()=>{if(cur)pull().catch(()=>{});loadChats().catch(()=>{})});
   addEventListener('pageshow',e=>{if(e.persisted){if(cur)pull().catch(()=>{});loadChats().catch(()=>{})}});
@@ -1252,20 +1269,28 @@ document.addEventListener('visibilitychange',()=>{
 
 </script>
 <script>
-// LYNKO CHAT — romantic home background, theme picker and loading skeletons.
+// LYNKO CHAT — themes (Lynko Love · WhatsApp style · White Liquid), admin-controlled default + logo, romantic background, skeletons.
+// The admin picks the default theme (and may force it for everyone) in /admin → Appearance. Otherwise every user can choose their own in ⋮ → 🎨 Theme.
 (function () {
-  const KEY = 'lk_theme', BGS = { love: 'Romantic hearts 💕', sakura: 'Sakura petals 🌸', stars: 'Starry night ✨', plain: 'Plain' };
+  const KEY = 'lk_theme', CK = 'lk_appcfg', MODES = { love: ['Lynko Love 💕', 'Romantic dark, floating hearts'], wa: ['WhatsApp style', 'Dark teal, green accents'], liquid: ['White Liquid ✨', 'Light frosted-glass look'] };
+  const BGS = { love: 'Romantic hearts 💕', sakura: 'Sakura petals 🌸', stars: 'Starry night ✨', plain: 'Plain' };
   const ACC = [['Rose', '#ff5c8a'], ['Lilac', '#b28cff'], ['Peach', '#ff9a6a'], ['Sky', '#5cb8ff'], ['Mint', '#4fe0b0']];
-  const get = () => { try { return Object.assign({ bg: 'love', ac: '#ff5c8a' }, JSON.parse(localStorage.getItem(KEY) || '{}')) } catch { return { bg: 'love', ac: '#ff5c8a' } } };
+  const BAR = { love: '#1a0713', wa: '#111b21', liquid: '#eef2ff' };
+  const J = (k, d) => { try { return Object.assign({}, d, JSON.parse(localStorage.getItem(k) || '{}')) } catch { return d } };
+  const user = () => J(KEY, { mode: '', bg: 'love', ac: '#ff5c8a' });
+  let cfg = J(CK, { theme: 'love', force: false, logoV: 0 });
+  const eff = () => { const m = cfg.force ? cfg.theme : (user().mode || cfg.theme); return MODES[m] ? m : 'love' };
   const lite = () => document.documentElement.classList.contains('lite');
 
+  const L = 'html:not([data-theme=wa]):not([data-theme=liquid])', W = 'html[data-theme=wa]', G = 'html[data-theme=liquid]';
+  const DOODLE = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120' viewBox='0 0 120 120'%3E%3Cg fill='none' stroke='%23ffffff' stroke-opacity='.05' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='20' cy='22' r='7'/%3E%3Cpath d='M70 18l8 8m0-8l-8 8'/%3E%3Cpath d='M30 80q8-12 16 0t16 0'/%3E%3Crect x='84' y='70' width='14' height='14' rx='3'/%3E%3Cpath d='M12 104l6-6 6 6-6 6z'/%3E%3Cpath d='M92 24q6-8 12 0t-12 12z'/%3E%3C/g%3E%3C/svg%3E")`;
   const st = document.createElement('style');
   st.textContent = `
-.side{isolation:isolate;background:linear-gradient(180deg,#2a0b21 0%,#1d0817 48%,#150510 100%)}
-#romBg{position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:-1;
+/* ── Lynko Love (default) ── */
+${L} .side{isolation:isolate;background:linear-gradient(180deg,#2a0b21 0%,#1d0817 48%,#150510 100%)}
+#romBg{position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:-1;contain:strict;
   background:radial-gradient(430px 330px at 88% -4%,rgba(255,92,138,.32),transparent 70%),radial-gradient(380px 300px at -12% 42%,rgba(178,140,255,.22),transparent 70%),radial-gradient(440px 360px at 72% 106%,rgba(255,179,138,.20),transparent 70%)}
 #romBg.plain{background:none}
-#romBg{contain:strict}
 #romBg i{position:absolute;font-style:normal;opacity:0;will-change:transform,opacity}
 #romBg.love i,#romBg.sakura i{animation:romUp linear infinite}
 #romBg.sakura i{top:-30px;animation-name:romDown}
@@ -1275,26 +1300,89 @@ document.addEventListener('visibilitychange',()=>{
 @keyframes romUp{0%{transform:translate3d(0,0,0) rotate(0) scale(.7);opacity:0}12%{opacity:.55}85%{opacity:.32}100%{transform:translate3d(var(--dx),-108vh,0) rotate(var(--rot)) scale(1.15);opacity:0}}
 @keyframes romDown{0%{transform:translate3d(0,0,0) rotate(0);opacity:0}10%{opacity:.7}90%{opacity:.4}100%{transform:translate3d(var(--dx),108vh,0) rotate(var(--rot));opacity:0}}
 @keyframes romTw{0%,100%{opacity:.1;transform:scale(.7)}50%{opacity:.85;transform:scale(1.15)}}
-.side .nav{background:rgba(29,8,23,.9)!important}
-.side .item .n{border-bottom-color:rgba(255,255,255,.07)}
-.side .item:active{background:rgba(255,92,138,.12)}
+${L} .side .nav{background:rgba(29,8,23,.9)!important}
+${L} .side .item .n{border-bottom-color:rgba(255,255,255,.07)}
+${L} .side .item:active{background:rgba(255,92,138,.12)}
 .lite #romBg i{animation:none!important;opacity:.28}
+
+/* ── WhatsApp style (dark) ── */
+${W}{--rose:#00a884;--peach:#25d366;--lilac:#53bdeb;--txt:#e9edef;--mut:#8696a0;--line:rgba(134,150,160,.18);--panel:#233138}
+${W} body{background:#0b141a}
+${W} .side,${W} .nav,${W} .comp{background:#111b21}
+${W} .head,${W} .rpb{background:#202c33}
+${W} .pill{background:#202c33;border-color:transparent}
+${W} .srch input,${W} .chips button{background:#202c33}
+${W} .chips button.on{background:rgba(0,168,132,.2);border-color:#00a884;color:#e9edef}
+${W} .nav .on i{background:rgba(0,168,132,.25)}
+${W} .nav .dot{border-color:#111b21}
+${W} .main{background:#0b141a}
+${W}:not([style*="--wp"]) .main{--wp:${DOODLE} 0 0/120px,#0b141a}
+${W} .them .b{background:#202c33;border-radius:10px;border-top-left-radius:2px}
+${W} .me .b{background:#005c4b;border-radius:10px;border-top-right-radius:2px}
+${W} .send{background:#00a884;box-shadow:none}
+${W} .badge{color:#0b141a;background:#00a884}
+${W} .lg{background:none;-webkit-text-fill-color:#00a884;color:#00a884;font:700 26px 'DM Sans',sans-serif}
+${W} .lg i{-webkit-text-fill-color:#00a884}
+${W} .add,${W} .btn.p{background:#00a884;box-shadow:0 6px 18px rgba(0,168,132,.35);color:#fff}
+${W} .item.on{background:#2a3942}
+${W} .item:active,${W} .ic:active{background:#202c33}
+
+/* ── White Liquid (light frosted glass) — only the main screens turn light; dialogs / viewers stay dark glass ── */
+${G}{color-scheme:light}
+${G} body{background:linear-gradient(160deg,#e6efff 0%,#f4eeff 48%,#ffeaf3 100%)}
+${G} .side,${G} .main{--txt:#1b2333;--mut:#6b7488;--line:rgba(30,45,90,.10);--rose:#4f7cff;--peach:#7cc4ff;--lilac:#a98bff;color:var(--txt)}
+${G} .side{background:transparent;border-right-color:rgba(255,255,255,.6)}
+${G} #romBg{background:radial-gradient(420px 320px at 90% -6%,rgba(120,150,255,.38),transparent 70%),radial-gradient(380px 300px at -10% 46%,rgba(255,150,200,.30),transparent 70%),radial-gradient(440px 360px at 70% 106%,rgba(140,220,255,.34),transparent 70%)}
+${G} .bar{background:transparent}
+${G} .head,${G} .nav,${G} .comp,${G} .rpb{background:rgba(255,255,255,.62);-webkit-backdrop-filter:blur(18px) saturate(1.5);backdrop-filter:blur(18px) saturate(1.5);border-color:rgba(255,255,255,.7)}
+${G} .comp{background:rgba(255,255,255,.35)}
+${G} .pill{background:rgba(255,255,255,.88);border:1px solid rgba(255,255,255,.95);box-shadow:0 6px 20px rgba(60,80,140,.12)}
+${G} .pill .ib,${G} .pill textarea::placeholder{color:#7b86a0}
+${G} .pill textarea,${G} .srch input{color:#1b2333}
+${G} .srch input{background-color:rgba(255,255,255,.75);border-color:rgba(255,255,255,.9)}
+${G} ::placeholder{color:#8a93a8}
+${G} .chips button{background:rgba(255,255,255,.6);color:#56607a;border-color:rgba(255,255,255,.9)}
+${G} .chips button.on{background:rgba(79,124,255,.16);color:#2442b8;border-color:#4f7cff}
+${G} .nav .on{color:#2442b8}${G} .nav .on i{background:rgba(79,124,255,.18)}
+${G} .nav .dot{border-color:#fff}
+${G} .item:active,${G} .ic:active{background:rgba(79,124,255,.10)}
+${G} .item.on{background:rgba(79,124,255,.12)}
+${G} .main{background:#f1f4ff}
+${G}:not([style*="--wp"]) .main{--wp:radial-gradient(700px 520px at 100% 0%,rgba(180,170,255,.45),transparent 65%),radial-gradient(640px 520px at 0% 100%,rgba(255,190,215,.45),transparent 65%),linear-gradient(160deg,#e9f0ff,#f6f0ff 55%,#fff0f6)}
+${G} .them .b{background:rgba(255,255,255,.86);color:#1b2333;box-shadow:0 3px 14px rgba(60,80,140,.10)}
+${G} .me .b{background:linear-gradient(135deg,#5b8cff,#8a6bff);color:#fff;box-shadow:0 5px 16px rgba(91,140,255,.32)}
+${G} .send{background:linear-gradient(135deg,#5b8cff,#8a6bff);box-shadow:0 8px 20px rgba(91,140,255,.4);color:#fff}
+${G} .add,${G} .btn.p{background:linear-gradient(135deg,#5b8cff,#8a6bff);box-shadow:0 8px 20px rgba(91,140,255,.35);color:#fff}
+${G} .sys{background:rgba(255,255,255,.75);color:#56607a;box-shadow:0 2px 10px rgba(60,80,140,.08)}
+${W} .sys{background:#182229;color:#8696a0}
+${G} .badge{color:#fff}
+${G} .head small.ty{color:#4f7cff}
+${G} .qt{color:inherit}
+${G} #emoBtn,${G} #stkBtn{color:#7b86a0}
+${G} .lg{background:linear-gradient(120deg,#4f7cff,#a98bff 60%,#ff7ab6);-webkit-background-clip:text;background-clip:text}
+.lite${G} .head,.lite${G} .nav,.lite${G} .comp,.lite${G} .rpb{-webkit-backdrop-filter:none;backdrop-filter:none;background:rgba(255,255,255,.9)}
+
+/* ── skeletons + picker ── */
 .sk{display:flex;gap:13px;padding:12px 14px;align-items:center}
 .sk i{width:46px;height:46px;border-radius:50%;flex:none}.sk div{flex:1;display:grid;gap:9px}.sk b,.sk s{display:block;border-radius:6px;height:12px}.sk s{height:10px;width:80%}
-.sk i,.sk b,.sk s{background:linear-gradient(90deg,rgba(255,255,255,.05) 25%,rgba(255,255,255,.13) 50%,rgba(255,255,255,.05) 75%);background-size:200% 100%;animation:skm 1.3s linear infinite}
+.sk i,.sk b,.sk s{background:linear-gradient(90deg,rgba(128,128,150,.10) 25%,rgba(128,128,150,.24) 50%,rgba(128,128,150,.10) 75%);background-size:200% 100%;animation:skm 1.3s linear infinite}
 @keyframes skm{from{background-position:200% 0}to{background-position:-200% 0}}
 .thm{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0}
-.thm button{padding:12px 8px;border-radius:14px;background:rgba(255,255,255,.07);border:1px solid transparent;font-size:14px}
-.thm button.on{border-color:var(--rose);background:rgba(255,92,138,.18)}
+.thm button,.thm3 button{padding:12px 8px;border-radius:14px;background:rgba(255,255,255,.07);border:1.5px solid transparent;font-size:14px}
+.thm button.on,.thm3 button.on{border-color:var(--rose);background:rgba(255,92,138,.18)}
+.thm3{display:grid;gap:8px;margin:10px 0}.thm3 button{text-align:left;display:grid;gap:2px}.thm3 small{color:var(--mut)}
 .acs{display:flex;gap:12px;margin:10px 0 4px}.acs button{width:38px;height:38px;border-radius:50%;border:3px solid transparent}.acs button.on{border-color:#fff}`;
   document.head.appendChild(st);
 
+  // ── apply ──
   let bg = null;
   function build() {
     const side = document.querySelector('.side'); if (!side) return;
     if (!bg) { bg = document.createElement('div'); bg.id = 'romBg'; bg.setAttribute('aria-hidden', 'true'); side.insertBefore(bg, side.firstChild) }
-    const t = get(); bg.className = t.bg; bg.innerHTML = '';
-    document.documentElement.style.setProperty('--rose', t.ac);
+    const t = user(), m = eff();
+    bg.innerHTML = '';
+    if (m != 'love') { bg.className = m == 'liquid' ? 'plain-glow' : 'plain'; if (m == 'liquid') bg.style.background = ''; return }
+    bg.className = t.bg; bg.style.background = '';
     const n = t.bg == 'plain' ? 0 : lite() ? 4 : t.bg == 'stars' ? 14 : 9, rnd = (a, b) => a + Math.random() * (b - a);
     const glyph = { love: ['♥', '♥', '❤', '✦'], sakura: ['🌸', '🌸', '✿'], stars: ['✦', '✧', '•', '✦'] }[t.bg] || [];
     const cols = ['#ff7aa5', '#ffb38a', '#c9a6ff', '#ff5c8a'];
@@ -1306,23 +1394,49 @@ document.addEventListener('visibilitychange',()=>{
       bg.appendChild(e);
     }
   }
+  function applyLogo() {
+    const v = +cfg.logoV || 0; window.LOGOV = v;
+    document.querySelectorAll('link[rel=icon],link[rel=apple-touch-icon]').forEach(l => { const b = l.getAttribute('href').split('?')[0]; l.setAttribute('href', v ? b + '?v=' + v : b) });
+    document.querySelectorAll('img[src^="/img/official.jpg"]').forEach(i => { i.src = '/img/official.jpg' + (v ? '?v=' + v : '') });
+  }
+  function apply() {
+    const m = eff(), h = document.documentElement, t = user();
+    h.dataset.theme = m;
+    if (m == 'love') h.style.setProperty('--rose', t.ac); else h.style.removeProperty('--rose');
+    const mt = document.querySelector('meta[name=theme-color]'); if (mt) mt.content = BAR[m];
+    build();
+  }
+  function setCfg(d) {
+    if (!d || !MODES[d.theme]) return;
+    const old = cfg.logoV; cfg = { theme: d.theme, force: !!d.force, logoV: +d.logoV || 0 };
+    try { localStorage.setItem(CK, JSON.stringify(cfg)) } catch {}
+    apply(); applyLogo();
+    if (old !== cfg.logoV) try { if (typeof me !== 'undefined' && me) renderList() } catch {}
+  }
+  const fetchCfg = () => fetch('/api/appconfig', { cache: 'no-store' }).then(r => r.ok ? r.json() : null).then(setCfg).catch(() => {});
+
   function skeleton() {
     const l = document.getElementById('list'); if (!l || l.children.length) return;
     l.innerHTML = Array.from({ length: 7 }, () => '<div class="sk"><i></i><div><b style="width:' + (40 + Math.random() * 30 | 0) + '%"></b><s></s></div></div>').join('');
   }
   function open() {
-    const t = get();
-    const o = (window.sheet || (() => null))(`<h3 style="margin-bottom:4px">Theme 🎨</h3><small style="color:var(--mut)">Home background</small><div class="thm">${Object.entries(BGS).map(([k, v]) => `<button data-b="${k}" class="${t.bg == k ? 'on' : ''}">${v}</button>`).join('')}</div><small style="color:var(--mut)">Accent colour</small><div class="acs">${ACC.map(([n, c]) => `<button data-c="${c}" aria-label="${n}" style="background:${c}" class="${t.ac == c ? 'on' : ''}"></button>`).join('')}</div>`);
+    const t = user(), m = eff(), forced = cfg.force;
+    const o = (window.sheet || (() => null))(`<h3 style="margin-bottom:4px">Theme 🎨</h3>${forced ? '<small style="color:var(--mut)">The app theme is set by the admin.</small>' : ''}<div class="thm3" ${forced ? 'style="opacity:.5;pointer-events:none"' : ''}>${Object.entries(MODES).map(([k, v]) => `<button data-m="${k}" class="${m == k ? 'on' : ''}"><b>${v[0]}</b><small>${v[1]}</small></button>`).join('')}</div><div id="lvx" ${m == 'love' ? '' : 'hidden'}><small style="color:var(--mut)">Home background</small><div class="thm">${Object.entries(BGS).map(([k, v]) => `<button data-b="${k}" class="${t.bg == k ? 'on' : ''}">${v}</button>`).join('')}</div><small style="color:var(--mut)">Accent colour</small><div class="acs">${ACC.map(([n, c]) => `<button data-c="${c}" aria-label="${n}" style="background:${c}" class="${t.ac == c ? 'on' : ''}"></button>`).join('')}</div></div>`);
     if (!o) return;
-    const save = v => { localStorage.setItem(KEY, JSON.stringify({ ...get(), ...v })); build(); o.querySelectorAll('[data-b]').forEach(b => b.classList.toggle('on', b.dataset.b == get().bg)); o.querySelectorAll('[data-c]').forEach(b => b.classList.toggle('on', b.dataset.c == get().ac)) };
+    const save = v => { try { localStorage.setItem(KEY, JSON.stringify({ ...user(), ...v })) } catch {} apply();
+      o.querySelectorAll('[data-m]').forEach(b => b.classList.toggle('on', b.dataset.m == eff()));
+      o.querySelectorAll('[data-b]').forEach(b => b.classList.toggle('on', b.dataset.b == user().bg));
+      o.querySelectorAll('[data-c]').forEach(b => b.classList.toggle('on', b.dataset.c == user().ac));
+      o.querySelector('#lvx').hidden = eff() != 'love' };
+    o.querySelectorAll('[data-m]').forEach(b => b.onclick = () => save({ mode: b.dataset.m }));
     o.querySelectorAll('[data-b]').forEach(b => b.onclick = () => save({ bg: b.dataset.b }));
     o.querySelectorAll('[data-c]').forEach(b => b.onclick = () => save({ ac: b.dataset.c }));
   }
-  document.addEventListener('visibilitychange', () => bg && bg.classList.toggle('pz', document.hidden));
-  // no animation work while the home screen is covered by an open chat
+  document.addEventListener('visibilitychange', () => { if (bg) bg.classList.toggle('pz', document.hidden); if (!document.hidden) fetchCfg() });
   try { new IntersectionObserver(es => { if (bg) bg.classList.toggle('pz', !es[0].isIntersecting || document.hidden) }, { threshold: 0.05 }).observe(document.querySelector('.side')) } catch {}
-  window.THEME = { open, build };
-  build(); skeleton();
+  addEventListener('online', fetchCfg);
+  window.THEME = { open, build, setCfg, mode: eff };
+  apply(); applyLogo(); skeleton(); fetchCfg();
 })();
 
 </script>
