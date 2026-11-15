@@ -8,6 +8,7 @@ const crypto = require('crypto');
 const path = require('path');
 const jwt = require('jsonwebtoken');
 const { ObjectId } = require('mongodb');
+const appcfg = require('./appcfg');
 
 const sha = s => crypto.createHash('sha256').update(String(s)).digest();
 const same = (a, b) => crypto.timingSafeEqual(sha(a), sha(b));
@@ -175,6 +176,22 @@ module.exports = function monitor({ secret, pusher, store, C }) {
       const r = await C.O.deleteOne({ _id });
       if (r.deletedCount) pusher.trigger('official', 'odel', { id: req.params.id }).catch(() => {});
       res.json({ ok: 1 });
+    });
+
+    // ── appearance: default theme (Lynko love / WhatsApp / white liquid), "force for everyone" and the app logo ──
+    const raw = (req, max) => new Promise((ok, no) => { const a = []; let n = 0; req.on('data', c => { n += c.length; if (n > max) { no(new Error('Image is too large (max 2 MB)')); req.destroy(); } else a.push(c); }); req.on('end', () => ok(Buffer.concat(a))); req.on('error', no); });
+    const push = d => pusher.trigger('official', 'cfg', d).catch(() => {});   // every open app switches live
+    app.get('/admin/api/appearance', guard, (q, r) => r.json(appcfg.pub()));
+    app.post('/admin/api/appearance', guard, async (req, res) => {
+      try { const d = await appcfg.setTheme(C, String((req.body || {}).theme || ''), !!(req.body || {}).force); push(d); res.json(d); }
+      catch (e) { res.status(400).json({ error: e.message }); }
+    });
+    app.post('/admin/api/logo', guard, async (req, res) => {
+      try { const d = await appcfg.setLogo(C, await raw(req, 2 * 1024 * 1024 + 1)); push(d); res.json(d); }
+      catch (e) { res.status(400).json({ error: e.message }); }
+    });
+    app.delete('/admin/api/logo', guard, async (req, res) => {
+      try { const d = await appcfg.clearLogo(C); push(d); res.json(d); } catch (e) { res.status(400).json({ error: e.message }); }
     });
   }
 
