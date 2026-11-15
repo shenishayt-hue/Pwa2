@@ -71,6 +71,10 @@ pre{white-space:pre-wrap;word-break:break-all;font:12px/1.5 ui-monospace,monospa
 .usr .a{width:40px;height:40px;border-radius:50%;display:grid;place-items:center;font-weight:700;color:#3a0a24;background:linear-gradient(135deg,var(--peach),var(--rose) 60%,var(--lilac));flex:none}
 .usr div{min-width:0;flex:1}.usr b,.usr small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.usr small{color:var(--mut);font-size:12.5px}
 .toast{position:fixed;left:50%;bottom:80px;transform:translateX(-50%);z-index:99;background:#000d;padding:10px 18px;border-radius:99px;font-size:14px}
+.thc{display:grid;gap:8px}.tc{display:grid;grid-template-columns:44px 1fr;grid-template-rows:auto auto;column-gap:12px;align-items:center;text-align:left;padding:12px;border-radius:16px;background:rgba(255,255,255,.06);border:1.5px solid transparent}
+.tc i{grid-row:1/3;width:44px;height:44px;border-radius:12px}.tc b{font-size:15px}.tc small{color:var(--mut)}.tc.on{border-color:var(--rose);background:rgba(255,92,138,.14)}
+.frc{display:flex;gap:10px;align-items:flex-start;margin-top:12px}.frc input{width:20px;height:20px;margin-top:2px;flex:none}.frc small{display:block;color:var(--mut);margin-top:2px}
+.lgrow{display:flex;gap:14px;align-items:center}.lgrow img{border-radius:20px;background:#0006;flex:none}.lgrow small{color:var(--mut);line-height:1.45}
 </style>
 </head>
 <body>
@@ -88,7 +92,7 @@ pre{white-space:pre-wrap;word-break:break-all;font:12px/1.5 ui-monospace,monospa
   <div class="top">
     <div class="row1"><b class="lg">Lynko Admin</b><small id="upd"></small><button class="btn s" id="out">Log out</button></div>
     <div class="tabs" id="tabs">
-      <button data-t="ov" class="on">Overview</button><button data-t="of">Official</button><button data-t="er">Errors<em id="ebadge" hidden></em></button><button data-t="us">Users</button>
+      <button data-t="ov" class="on">Overview</button><button data-t="of">Official</button><button data-t="er">Errors<em id="ebadge" hidden></em></button><button data-t="us">Users</button><button data-t="ap">Appearance</button>
     </div>
   </div>
   <main>
@@ -122,6 +126,25 @@ pre{white-space:pre-wrap;word-break:break-all;font:12px/1.5 ui-monospace,monospa
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px"><h2 style="margin:0">Errors (grouped)</h2><button class="btn d s" id="eclr">Clear all</button></div>
       <div id="elist"></div>
     </section>
+    <!-- appearance -->
+    <section id="t-ap" hidden>
+      <h2>App theme</h2>
+      <div class="box">
+        <div id="thm" class="thc">
+          <button data-th="love" class="tc"><i style="background:linear-gradient(135deg,#ff5c8a,#8d3bd6)"></i><b>Lynko Love 💕</b><small>Romantic dark, floating hearts</small></button>
+          <button data-th="wa" class="tc"><i style="background:linear-gradient(135deg,#00a884,#0b141a)"></i><b>WhatsApp style</b><small>Dark teal, green accents</small></button>
+          <button data-th="liquid" class="tc"><i style="background:linear-gradient(135deg,#ffffff,#9db8ff)"></i><b>White Liquid ✨</b><small>Light frosted-glass look</small></button>
+        </div>
+        <label class="frc"><input type="checkbox" id="frc"> <span>Force this theme for everyone <small>(users can’t change it). Off = it is only the default, every user can pick their own.</small></span></label>
+        <button class="btn p" id="thsave" style="width:100%;margin-top:12px">Save theme</button>
+      </div>
+      <h2>App logo</h2>
+      <div class="box">
+        <div class="lgrow"><img id="lgprev" alt="Current logo" width="84" height="84"><div><small>Used for the app icon, the browser tab and the Lynko Official avatar. Square image (PNG / JPG / WebP, up to 2 MB). Already-installed home-screen icons only change after the app is re-installed.</small></div></div>
+        <input type="file" id="lgfile" accept="image/png,image/jpeg,image/webp" hidden>
+        <div style="display:flex;gap:8px;margin-top:12px"><button class="btn p" id="lgpick" style="flex:1">Upload new logo</button><button class="btn d" id="lgreset">Reset</button></div>
+      </div>
+    </section>
     <!-- users -->
     <section id="t-us" hidden>
       <h2>Find accounts</h2>
@@ -154,8 +177,25 @@ $('out').onclick=async()=>{await api('/admin/api/logout','POST').catch(()=>{});s
 let tab='ov',timer;
 document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{tab=b.dataset.t;
   document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('on',x==b));
-  ['ov','of','er','us'].forEach(t=>$('t-'+t).hidden=t!=tab);load()});
-const load=()=>({ov:overview,of:official,er:errors,us:users}[tab])().catch(e=>{if(e.message!='Login required')toast(e.message)});
+  ['ov','of','er','us','ap'].forEach(t=>$('t-'+t).hidden=t!=tab);load()});
+const load=()=>({ov:overview,of:official,er:errors,us:users,ap:appearance}[tab])().catch(e=>{if(e.message!='Login required')toast(e.message)});
+
+// ── appearance ──
+let selTh='love';
+const thSel=t=>{selTh=t;document.querySelectorAll('#thm .tc').forEach(c=>c.classList.toggle('on',c.dataset.th==t))};
+document.querySelectorAll('#thm .tc').forEach(c=>c.onclick=()=>thSel(c.dataset.th));
+const lgShow=d=>{$('lgprev').src=(d.logo?'/icons/icon-192.png?v='+d.logoV:'/icons/icon-192.png?x='+Date.now())};
+async function appearance(){const d=await api('/admin/api/appearance');thSel(d.theme);$('frc').checked=!!d.force;lgShow(d)}
+$('thsave').onclick=async()=>{$('thsave').disabled=true;try{await api('/admin/api/appearance','POST',{theme:selTh,force:$('frc').checked});toast('Saved ✓ — open apps switch right away')}catch(e){toast(e.message)}$('thsave').disabled=false};
+$('lgpick').onclick=()=>$('lgfile').click();
+$('lgfile').onchange=async()=>{const f=$('lgfile').files[0];$('lgfile').value='';if(!f)return;
+  try{   // square-crop to 512×512 PNG here, so any photo works
+    const bmp=await createImageBitmap(f),c=document.createElement('canvas');c.width=c.height=512;const s=Math.min(bmp.width,bmp.height);
+    c.getContext('2d').drawImage(bmp,(bmp.width-s)/2,(bmp.height-s)/2,s,s,0,0,512,512);
+    const blob=await new Promise(r=>c.toBlob(r,'image/png'));
+    const r=await fetch('/admin/api/logo',{method:'POST',headers:{'Content-Type':'application/octet-stream','X-Admin':'1'},body:blob}),d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.error||'Upload failed');lgShow(d);toast('Logo updated ✓')}catch(e){toast(e.message||'Could not read that image')}};
+$('lgreset').onclick=async()=>{if(!confirm('Go back to the default logo?'))return;try{const d=await api('/admin/api/logo','DELETE');lgShow(d);toast('Logo reset')}catch(e){toast(e.message)}};
 
 // ── overview ──
 const METRICS=[['req','Requests'],['msg','Messages'],['reg','New accounts'],['login','Logins'],['err','Errors']];
