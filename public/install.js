@@ -95,11 +95,6 @@
         }
       }
     }
-    // offline pill
-    const pill = document.createElement('div');
-    pill.textContent = '📴 Offline — saved chats pennanawa';
-    pill.style.cssText = 'position:fixed;top:calc(8px + env(safe-area-inset-top));left:50%;transform:translateX(-50%);z-index:100001;padding:6px 14px;border-radius:99px;background:rgba(36,11,29,.95);border:1px solid rgba(255,255,255,.2);color:#ffd9e6;font:500 12.5px "DM Sans",system-ui,sans-serif;pointer-events:none';
-    const sync = () => { if (navigator.onLine) pill.remove(); else document.body.appendChild(pill); };
-    addEventListener('online', sync); addEventListener('offline', sync); sync();
+    // (the offline banner now lives in the page itself, see the offline store)
   });
 })();
