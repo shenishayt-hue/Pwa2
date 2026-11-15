@@ -37,6 +37,7 @@ async function build(name) {
   built.set(name, out); return out;
 }
 
+const setLogo = buf => { srcP = buf ? Promise.resolve(buf) : null; built.clear(); };
 module.exports = async (req, res, next) => {
   try {
     const b = await build(req.params.name);
@@ -44,3 +45,4 @@ module.exports = async (req, res, next) => {
     res.set('Cache-Control', 'public, max-age=86400').type('png').send(b);
   } catch (e) { console.error('icon build failed', e.message); next(); }
 };
+module.exports.setLogo = setLogo;
