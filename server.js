@@ -16,6 +16,7 @@ const pusher = new Pusher({ appId: process.env.PUSHER_APP_ID, key: process.env.P
 
 const C = {};   // collections shared with admin.js (filled once Mongo is connected)
 const store = require('./storage');
+const appcfg = require('./appcfg');
 const mon = require('./admin')({ secret: SECRET, pusher, store, C });
 process.on('unhandledRejection', e => { console.error('unhandledRejection', e); mon.logError('process', e); });
 process.on('uncaughtException', e => { console.error('uncaughtException', e); mon.logError('process', e); setTimeout(() => process.exit(1), 800); });
@@ -156,10 +157,18 @@ app.get('/features.js', (q, r) => { r.set('Cache-Control', 'no-cache'); r.type('
 const IMG = { 'official.jpg': ['https://cloud.laksidu.site/stream/bDNbobv3aa/lynko-chat-logo-500kb.jpg', 'image/jpeg'], 'ai.png': ['https://cloud.laksidu.site/stream/G3KLWxG4uM/Screenshot_20261025-204440.png', 'image/png'] }, imgC = {};
 app.get('/img/:n', async (q, r) => {   // official-account logo + AI icon (the CSP only allows images from this same site, so the server fetches them)
   const d = IMG[q.params.n]; if (!d) return r.status(404).end();
+  const cl = q.params.n == 'official.jpg' && appcfg.logo(); if (cl) return r.set({ 'Content-Type': cl.mime, 'Cache-Control': 'public, max-age=300' }).send(cl.buf);   // logo uploaded in the admin dashboard
   try {
     if (!imgC[q.params.n]) { const ac = new AbortController(), t = setTimeout(() => ac.abort(), 12000); try { const f = await fetch(d[0], { signal: ac.signal }); if (!f.ok) throw 0; imgC[q.params.n] = Buffer.from(await f.arrayBuffer()); } finally { clearTimeout(t); } }
     r.set({ 'Content-Type': d[1], 'Cache-Control': 'public, max-age=86400' }).send(imgC[q.params.n]);
   } catch { r.redirect(302, '/icons/icon-192.png'); }
+});
+// appearance (set in /admin → Appearance): public so the login page and every client can read it
+app.get('/api/appconfig', (q, r) => r.set('Cache-Control', 'no-cache').json(appcfg.pub()));
+app.get('/manifest.json', (q, r) => {
+  const m = JSON.parse(fs.readFileSync(path.join(__dirname, 'public/manifest.json'), 'utf8')), v = appcfg.state.logoV;
+  if (v) m.icons.forEach(i => { i.src += '?v=' + v; });
+  r.set('Cache-Control', 'no-cache').type('application/manifest+json').send(JSON.stringify(m));
 });
 app.get('/icons/:name', require('./icons'));   // LYNKO CHAT logo -> app icons
 app.use(express.static(path.join(__dirname, 'public'), { maxAge: '7d', index: false,
@@ -573,7 +582,8 @@ const flat = (sys, list) => `${sys}\n\n--- CONVERSATION SO FAR ---\n` + list.sli
 async function askSupun(prompt, signal) {
   const sig = () => { const t = AbortSignal.timeout(45000); return signal ? AbortSignal.any([t, signal]) : t; };
   const tryPost = async () => {
-    const r = await fetch(SUPUN_URL, { method: 'POST', signal: sig(), headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ prompt, model: SUPUN_MODEL, apikey: SUPUN_KEY }) });
+    const pu = new URL(SUPUN_URL); pu.searchParams.set('apikey', SUPUN_KEY); pu.searchParams.set('model', SUPUN_MODEL);
+    const r = await fetch(pu, { method: 'POST', signal: sig(), headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ prompt, model: SUPUN_MODEL, apikey: SUPUN_KEY }) });
     const t = await r.text(); let j; try { j = JSON.parse(t) } catch {}
     if (r.status === 401 || r.status === 403) { const e = new Error('Supun key rejected'); e.auth = true; throw e; }
     if (!r.ok || !j) throw new Error('post ' + r.status + ' ' + t.slice(0, 120));
@@ -587,8 +597,11 @@ async function askSupun(prompt, signal) {
     const j = await r.json().catch(() => null); if (!r.ok || !j || j.success === false) throw new Error('get ' + r.status);
     const out = supunText(j); if (!out) throw new Error('empty'); return out;
   };
-  let err;
-  for (const f of [tryPost, tryGet, tryPost]) { try { return await f() } catch (e) { err = e; if (e.auth || (signal && signal.aborted)) break; } }
+  let err, auths = 0;
+  for (const f of [tryPost, tryGet, tryPost]) {
+    if (auths >= 2) break;   // POST and GET both said "bad key": no point trying again
+    try { return await f() } catch (e) { err = e; if (e.auth) auths++; if (signal && signal.aborted) break; }
+  }
   throw err;
 }
 
@@ -672,6 +685,7 @@ app.use((e, q, r, n) => {
   const db = cl.db(process.env.MONGODB_DB || 'lynko');
   U = db.collection('users'); M = db.collection('messages'); S = db.collection('statuses'); K = db.collection('calls');
   Object.assign(C, { db, U, M, S, E: db.collection('errors'), D: db.collection('stats'), O: db.collection('official') });
+  await appcfg.load(C).catch(e => console.warn('appearance settings:', e.message));
   await U.createIndex({ id: 1 }, { unique: true }); try { await U.dropIndex('username_1'); } catch {} await U.createIndex({ username: 1 });
   const phoneIx = { unique: true, partialFilterExpression: { phone: { $type: 'string' } } };
   try { await U.createIndex({ phone: 1 }, phoneIx); }
