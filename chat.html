@@ -245,7 +245,120 @@ input:-webkit-autofill,textarea:-webkit-autofill{-webkit-box-shadow:0 0 0 100px 
 <meta name="apple-mobile-web-app-title" content="LYNKO CHAT">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="icon" href="/icons/icon-192.png">
-<script src="/offline.js?v={{V}}"></script><script>window.OFF=window.OFF||{ok:function(){return false},read:function(){return Promise.resolve()},save:function(){},net:function(){},warm:function(){},onBack:function(){},addMsg:function(){return Promise.resolve()},delMsg:function(){return Promise.resolve()},wipe:function(){},online:true}</script><script src="/install.js?v={{V}}" defer></script><script src="/heal.js?v={{V}}" defer></script><script src="/smooth.js?v={{V}}" defer></script><script src="/theme.js?v={{V}}" defer></script>
+<script>
+// LYNKO CHAT — offline store.
+// Every chat list / message list the app loads (and every message that arrives live) is saved on the phone in IndexedDB.
+// Offline = the saved copy is shown exactly like normal. Everything saved is the same ENCRYPTED data the server sends
+// (the key never leaves the phone) and it is wiped on logout. Messages older than 24 h are dropped, like on the server.
+(function () {
+  const DB = 'lynko-offline', ST = 'kv', KEEP = 864e5, MAXMSG = 300;
+  const uid = () => localStorage.getItem('lynko_id') || '0';
+  const P = () => uid() + '|';
+  let dbp = null;
+  const db = () => dbp || (dbp = new Promise((res, rej) => {
+    if (!window.indexedDB) return rej(new Error('no idb'));
+    const r = indexedDB.open(DB, 1);
+    r.onupgradeneeded = () => r.result.createObjectStore(ST);
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+    r.onblocked = () => rej(new Error('blocked'));
+  }).catch(e => { dbp = null; throw e }));
+  const run = (mode, f) => db().then(d => new Promise((res, rej) => {
+    const t = d.transaction(ST, mode), s = t.objectStore(ST); let out;
+    const q = f(s); if (q) q.onsuccess = () => { out = q.result };
+    t.oncomplete = () => res(out); t.onerror = t.onabort = () => rej(t.error);
+  }));
+  const get = k => run('readonly', s => s.get(P() + k)).catch(() => undefined);
+  const set = (k, v) => run('readwrite', s => s.put(v, P() + k)).catch(() => {});
+  const del = k => run('readwrite', s => s.delete(P() + k)).catch(() => {});
+  const keys = prefix => run('readonly', s => s.getAllKeys()).then(a => (a || []).filter(k => typeof k == 'string' && k.startsWith(P() + prefix)).map(k => k.slice(P().length))).catch(() => []);
+  const live = m => Date.now() - new Date(m.ts) < KEEP;
+
+  // ── what is worth saving ──
+  const SAVE = /^\/api\/(me|config|chats|messages|statuses|official|calls)(\?|$)/;
+  const ok = url => SAVE.test(url);
+  const parts = url => { const u = new URL(url, location.origin); return { path: u.pathname, w: u.searchParams.get('with'), after: u.searchParams.get('after') } };
+
+  async function mergeMsgs(w, add, replace) {
+    let list = replace ? [] : (await get('msgs:' + w)) || [];
+    const at = new Map(list.map((m, i) => [m.id, i]));
+    for (const m of add) { if (!m || !m.id || m.pending) continue; if (at.has(m.id)) list[at.get(m.id)] = { ...list[at.get(m.id)], ...m }; else { at.set(m.id, list.length); list.push(m) } }
+    list = list.filter(live).sort((a, b) => String(a.ts).localeCompare(String(b.ts))).slice(-MAXMSG);
+    await set('msgs:' + w, list); return list;
+  }
+  async function save(url, data) {
+    try {
+      const { path, w, after } = parts(url);
+      if (path == '/api/messages' && w && Array.isArray(data)) return mergeMsgs(w, data, !after);
+      if (path == '/api/me' && data && data.contacts) { await set('me', data); return }
+      await set('u:' + path, data);
+    } catch {}
+  }
+  async function read(url) {
+    try {
+      const { path, w, after } = parts(url);
+      if (path == '/api/messages' && w) {
+        let l = ((await get('msgs:' + w)) || []).filter(live);
+        if (after) l = l.filter(m => String(m.ts) > after);
+        return l;
+      }
+      if (path == '/api/me') return await get('me');
+      if (path == '/api/chats') {   // rebuilt from saved messages so chats that received live messages are up to date too
+        const old = (await get('u:/api/chats')) || [], by = new Map(old.map(c => [c.peer, c])), me = uid();
+        for (const k of await keys('msgs:')) {
+          const peer = k.slice(5), l = ((await get(k)) || []).filter(live); if (!l.length) { by.delete(peer); continue }
+          const last = l[l.length - 1], o = by.get(peer), unread = l.filter(m => m.from != me && !m.r).length;
+          if (!o || String(last.ts) >= String(o.last && o.last.ts || '')) by.set(peer, { peer, unread: Math.max(unread, 0), last });
+        }
+        return [...by.values()];
+      }
+      return await get('u:' + path);
+    } catch { return undefined }
+  }
+
+  // ── network state + banner ──
+  let online = navigator.onLine !== false, bar = null; const back = [];
+  function paint() {
+    if (!bar) {
+      const st = document.createElement('style');
+      st.textContent = '#offbar{position:fixed;left:50%;transform:translate(-50%,-140%);top:calc(46px + env(safe-area-inset-top));z-index:90;background:#3a1230;color:#ffe3ee;border:1px solid rgba(255,255,255,.18);border-radius:20px;padding:7px 14px;font:500 13px/1.2 "DM Sans",system-ui,sans-serif;box-shadow:0 6px 24px #0008;transition:transform .25s ease;pointer-events:none;max-width:92vw;text-align:center}#offbar.on{transform:translate(-50%,0)}';
+      document.head.appendChild(st);
+      bar = document.createElement('div'); bar.id = 'offbar'; bar.textContent = '📴 Offline — showing saved chats'; bar.setAttribute('role', 'status'); document.body.appendChild(bar);
+    }
+    bar.classList.toggle('on', !online);
+  }
+  function net(v) {
+    v = !!v; if (v === online) return; online = v;
+    if (document.body) paint(); else addEventListener('DOMContentLoaded', paint);
+    if (v) back.forEach(f => { try { f() } catch {} });
+  }
+  addEventListener('online', () => net(true)); addEventListener('offline', () => net(false));
+  addEventListener('DOMContentLoaded', () => { if (!online) paint() });
+
+  // ── pre-download small media (photos, voice) so they open offline too ──
+  const warmed = new Set(), q = []; let busy = 0;
+  function warm(m, p) {
+    if (!online || !m || !p || m.pending || warmed.has(m.id) || !m.media && !/^(img|aud)$/.test(p.k)) return;
+    if (!/^(img|aud)$/.test(p.k) || (p.size || 0) > 3 * 1048576) return;
+    warmed.add(m.id); q.push('/api/blob/' + m.id); pump();
+  }
+  function pump() {
+    if (busy >= 2 || !q.length) return; busy++;
+    const u = q.shift();
+    fetch(u).catch(() => {}).finally(() => { busy--; setTimeout(pump, 120) });
+  }
+
+  window.OFF = {
+    ok, read, save, net, warm, get, set,
+    get online() { return online },
+    onBack: f => back.push(f),
+    addMsg: (peer, m) => mergeMsgs(peer, [m], false).catch(() => {}),
+    delMsg: id => keys('msgs:').then(ks => Promise.all(ks.map(async k => { const l = (await get(k)) || []; if (l.some(m => m.id == id)) await set(k, l.filter(m => m.id != id)) }))).catch(() => {}),
+    wipe: () => { try { indexedDB.deleteDatabase(DB) } catch {} dbp = null },
+  };
+})();
+
+</script><script>window.OFF=window.OFF||{ok:function(){return false},read:function(){return Promise.resolve()},save:function(){},net:function(){},warm:function(){},onBack:function(){},addMsg:function(){return Promise.resolve()},delMsg:function(){return Promise.resolve()},wipe:function(){},online:true}</script><script src="/install.js?v={{V}}" defer></script>
 <script>(function(){var vv=window.visualViewport,f=function(){document.documentElement.style.setProperty('--vh',((vv?vv.height:window.innerHeight)*0.01)+'px');if(scrollY||scrollX)scrollTo(0,0)};f();
 addEventListener('resize',f);addEventListener('orientationchange',function(){setTimeout(f,150)});addEventListener('scroll',function(){if(scrollY||scrollX)scrollTo(0,0)},{passive:true});
 if(vv){vv.addEventListener('resize',f);vv.addEventListener('scroll',f)}document.addEventListener('focusout',function(){setTimeout(f,80)})})()</script>
@@ -538,7 +651,7 @@ addEventListener('popstate',()=>{if(skipPop){skipPop=0;return}if(sv){sv._close(t
 $('back').onclick=()=>history.back();
 async function pull(){
   if(!cur||cur=='ai')return;if(cur=='official')return loadOfficial().then(markOffRead);const id=cur,last=msgs.filter(m=>!m.pending).slice(-1)[0]?.ts||'';
-  const list=await api('/api/messages?with='+id+(last?'&after='+encodeURIComponent(last):''));
+  const list=await api('/api/messages?with='+id+(last?'&after='+encodeURIComponent(new Date(Date.parse(last)-3000).toISOString()):''));
   if(id!=cur)return;await Promise.all(list.map(payload));if(id!=cur)return;paintBatch(list,false);list.forEach(m=>cacheMsg(id,m));markRead()}
 function markRead(){
   if(!cur||document.hidden)return;const un=msgs.filter(m=>m.from!=me.id&&!m.r);if(!un.length)return;
@@ -1050,10 +1163,10 @@ document.addEventListener('visibilitychange',()=>{
   let cfg;try{[me,cfg]=await Promise.all([api('/api/me'),api('/api/config')])}catch{return}
   priv=await crypto.subtle.importKey('jwk',JSON.parse(pj),{name:'ECDH',namedCurve:'P-256'},false,['deriveKey']);
   contacts=new Map(me.contacts.map(c=>[c.id,nick(c)]));paintMe();applyWp();try{renderList()}catch(e){console.error(e)}warmBanners();loadChats().catch(()=>{}).then(ackAll);loadStatuses().catch(()=>{});loadOfficial().catch(()=>{});
-  if(typeof Pusher==='undefined')await new Promise(r=>{const e=$('pjs');if(!e)return r();e.addEventListener('load',r);e.addEventListener('error',r);setTimeout(r,5000)});
   window.__lynkoReady=1;
-  if(typeof Pusher==='undefined'){OFF.onBack(()=>{if(typeof Pusher==='undefined'&&!sessionStorage.getItem('lk_ob')){sessionStorage.setItem('lk_ob','1');location.reload()}});return}   // offline: show saved chats only; reload once when the network returns
-  const ps=new Pusher(cfg.key,{cluster:cfg.cluster,channelAuthorization:{endpoint:'/api/pusher/auth'}}),ch=ps.subscribe('private-u-'+me.id);
+  let rt=null,tick=0;const rtOK=()=>!!(rt&&rt.connection&&rt.connection.state=='connected');
+  const startRT=()=>{if(rt||typeof Pusher==='undefined'||!cfg||!cfg.key)return;
+  const ps=rt=new Pusher(cfg.key,{cluster:cfg.cluster,channelAuthorization:{endpoint:'/api/pusher/auth'}}),ch=ps.subscribe('private-u-'+me.id);
   ch.bind('msg',async d=>{
     if(d.from!=me.id)ackDlv(d.id);   // our phone has it -> sender's tick turns into ✓✓
     if(d.from==me.id&&d.tmp&&seen.has(d.tmp))return;   // the send call finishes that bubble itself
@@ -1080,7 +1193,181 @@ document.addEventListener('visibilitychange',()=>{
   OFF.onBack(()=>{if(cur)pull().catch(()=>{});loadChats().catch(()=>{}).then(ackAll);loadStatuses().catch(()=>{});loadOfficial().catch(()=>{})});
   let first=1;ps.connection.bind('connected',()=>{if(first){first=0;return}if(cur)pull();loadChats().catch(()=>{}).then(ackAll);loadStatuses().catch(()=>{});loadOfficial().catch(()=>{})});
   F.init({ps,ch,cfg});
+  };
+  startRT();
+  if(!rt){   // the Pusher script was slow or blocked: keep trying, and start live updates the moment it arrives
+    const e=$('pjs');e&&e.addEventListener('load',startRT);let n=0;
+    const t=setInterval(()=>{if(rt||++n>10)return clearInterval(t);const x=document.createElement('script');x.src='https://js.pusher.com/8.2.0/pusher.min.js?r='+n;x.onload=startRT;document.head.appendChild(x)},10000);
+    OFF.onBack(startRT)}
+  // safety net: new messages / chats always appear on their own, even if live updates are down (3.5 s) or missed one (20 s)
+  async function syncFull(){const id=cur;if(!id||id=='ai'||id=='official')return;const list=await api('/api/messages?with='+id);if(id!=cur)return;await Promise.all(list.map(payload));if(id!=cur)return;reconcile(list);markRead()}
+  const poll=()=>setTimeout(async()=>{
+    try{if(!document.hidden&&navigator.onLine!==false){
+      tick++;const fast=!rtOK(),chat=cur&&cur!='ai'&&cur!='official';
+      if(chat)await pull().catch(()=>{});
+      if(tick%(fast?2:3)==0)await loadChats().catch(()=>{}).then(ackAll);
+      if(chat&&tick%(fast?4:8)==0)await syncFull().catch(()=>{})}}
+    finally{poll()}},rtOK()?20000:3500);
+  poll();
+  addEventListener('focus',()=>{if(cur)pull().catch(()=>{});loadChats().catch(()=>{})});
+  addEventListener('pageshow',e=>{if(e.persisted){if(cur)pull().catch(()=>{});loadChats().catch(()=>{})}});
 })();
+</script>
+<script>
+// LYNKO CHAT — smoothness on every phone: light mode for weak devices, keyboard handling, small input fixes.
+(function () {
+  const d = document.documentElement;
+  const mem = navigator.deviceMemory || 4, cores = navigator.hardwareConcurrency || 4, c = navigator.connection || {};
+  if (mem <= 2 || (cores <= 4 && mem <= 3) || c.saveData || matchMedia('(prefers-reduced-motion: reduce)').matches) d.classList.add('lite');
+  const st = document.createElement('style');
+  st.textContent = '.lite *,.lite *::before,.lite *::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important}.lite .bh{display:none!important}.lite .ssp,.lite .sp{animation-duration:.8s!important;animation-iteration-count:infinite!important}'
+    + 'input,textarea,select{font-size:max(16px,1em)}'      // iOS/Android never zoom into a field
+    + '.msgs{overflow-anchor:auto;-webkit-overflow-scrolling:touch}';
+  document.head.appendChild(st);
+
+  const box = () => document.getElementById('msgs'), txt = () => document.getElementById('txt');
+  let near = true;
+  const watch = () => { const b = box(); if (!b || b._w) return; b._w = 1; b.addEventListener('scroll', () => { near = b.scrollHeight - b.scrollTop - b.clientHeight < 160 }, { passive: true }) };
+  watch();
+
+  // keyboard opens / closes: keep the newest message right above the typing box (only if you were already at the bottom)
+  const vv = window.visualViewport; let last = vv ? vv.height : innerHeight, raf = 0;
+  const stick = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => { const b = box(); if (b && !b.hidden && near) b.scrollTop = b.scrollHeight }) };
+  if (vv) vv.addEventListener('resize', () => { watch(); if (Math.abs(vv.height - last) > 60) stick(); last = vv.height });
+  document.addEventListener('focusin', e => { if (e.target === txt()) { watch(); setTimeout(stick, 120); setTimeout(stick, 350) } });
+  document.addEventListener('focusout', e => { if (e.target === txt()) setTimeout(() => { scrollTo(0, 0) }, 60) });
+
+  // the typing box: sensible mobile keyboard
+  const t = txt(); if (t) { t.setAttribute('autocomplete', 'off'); t.setAttribute('autocorrect', 'on'); t.setAttribute('autocapitalize', 'sentences'); t.setAttribute('inputmode', 'text') }
+
+  // no zoom at all (pinch, double-tap, Ctrl+wheel / Ctrl +/-): the app always keeps its size
+  ['gesturestart', 'gesturechange', 'gestureend'].forEach(ev => document.addEventListener(ev, e => e.preventDefault(), { passive: false }));
+  document.addEventListener('touchmove', e => { if (e.touches.length > 1 || (e.scale && e.scale !== 1)) e.preventDefault() }, { passive: false });
+  document.addEventListener('wheel', e => { if (e.ctrlKey) e.preventDefault() }, { passive: false });
+  document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && ['+', '-', '=', '0'].includes(e.key)) e.preventDefault() });
+
+  // buttons feel instant (no 300 ms wait, no accidental text selection)
+  document.addEventListener('touchstart', () => {}, { passive: true });
+})();
+
+</script>
+<script>
+// LYNKO CHAT — romantic home background, theme picker and loading skeletons.
+(function () {
+  const KEY = 'lk_theme', BGS = { love: 'Romantic hearts 💕', sakura: 'Sakura petals 🌸', stars: 'Starry night ✨', plain: 'Plain' };
+  const ACC = [['Rose', '#ff5c8a'], ['Lilac', '#b28cff'], ['Peach', '#ff9a6a'], ['Sky', '#5cb8ff'], ['Mint', '#4fe0b0']];
+  const get = () => { try { return Object.assign({ bg: 'love', ac: '#ff5c8a' }, JSON.parse(localStorage.getItem(KEY) || '{}')) } catch { return { bg: 'love', ac: '#ff5c8a' } } };
+  const lite = () => document.documentElement.classList.contains('lite');
+
+  const st = document.createElement('style');
+  st.textContent = `
+.side{isolation:isolate;background:linear-gradient(180deg,#2a0b21 0%,#1d0817 48%,#150510 100%)}
+#romBg{position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:-1;
+  background:radial-gradient(430px 330px at 88% -4%,rgba(255,92,138,.32),transparent 70%),radial-gradient(380px 300px at -12% 42%,rgba(178,140,255,.22),transparent 70%),radial-gradient(440px 360px at 72% 106%,rgba(255,179,138,.20),transparent 70%)}
+#romBg.plain{background:none}
+#romBg{contain:strict}
+#romBg i{position:absolute;font-style:normal;opacity:0;will-change:transform,opacity}
+#romBg.love i,#romBg.sakura i{animation:romUp linear infinite}
+#romBg.sakura i{top:-30px;animation-name:romDown}
+#romBg.love i{bottom:-40px}
+#romBg.stars i{animation:romTw ease-in-out infinite}
+#romBg.pz i{animation-play-state:paused}
+@keyframes romUp{0%{transform:translate3d(0,0,0) rotate(0) scale(.7);opacity:0}12%{opacity:.55}85%{opacity:.32}100%{transform:translate3d(var(--dx),-108vh,0) rotate(var(--rot)) scale(1.15);opacity:0}}
+@keyframes romDown{0%{transform:translate3d(0,0,0) rotate(0);opacity:0}10%{opacity:.7}90%{opacity:.4}100%{transform:translate3d(var(--dx),108vh,0) rotate(var(--rot));opacity:0}}
+@keyframes romTw{0%,100%{opacity:.1;transform:scale(.7)}50%{opacity:.85;transform:scale(1.15)}}
+.side .nav{background:rgba(29,8,23,.9)!important}
+.side .item .n{border-bottom-color:rgba(255,255,255,.07)}
+.side .item:active{background:rgba(255,92,138,.12)}
+.lite #romBg i{animation:none!important;opacity:.28}
+.sk{display:flex;gap:13px;padding:12px 14px;align-items:center}
+.sk i{width:46px;height:46px;border-radius:50%;flex:none}.sk div{flex:1;display:grid;gap:9px}.sk b,.sk s{display:block;border-radius:6px;height:12px}.sk s{height:10px;width:80%}
+.sk i,.sk b,.sk s{background:linear-gradient(90deg,rgba(255,255,255,.05) 25%,rgba(255,255,255,.13) 50%,rgba(255,255,255,.05) 75%);background-size:200% 100%;animation:skm 1.3s linear infinite}
+@keyframes skm{from{background-position:200% 0}to{background-position:-200% 0}}
+.thm{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0}
+.thm button{padding:12px 8px;border-radius:14px;background:rgba(255,255,255,.07);border:1px solid transparent;font-size:14px}
+.thm button.on{border-color:var(--rose);background:rgba(255,92,138,.18)}
+.acs{display:flex;gap:12px;margin:10px 0 4px}.acs button{width:38px;height:38px;border-radius:50%;border:3px solid transparent}.acs button.on{border-color:#fff}`;
+  document.head.appendChild(st);
+
+  let bg = null;
+  function build() {
+    const side = document.querySelector('.side'); if (!side) return;
+    if (!bg) { bg = document.createElement('div'); bg.id = 'romBg'; bg.setAttribute('aria-hidden', 'true'); side.insertBefore(bg, side.firstChild) }
+    const t = get(); bg.className = t.bg; bg.innerHTML = '';
+    document.documentElement.style.setProperty('--rose', t.ac);
+    const n = t.bg == 'plain' ? 0 : lite() ? 4 : t.bg == 'stars' ? 14 : 9, rnd = (a, b) => a + Math.random() * (b - a);
+    const glyph = { love: ['♥', '♥', '❤', '✦'], sakura: ['🌸', '🌸', '✿'], stars: ['✦', '✧', '•', '✦'] }[t.bg] || [];
+    const cols = ['#ff7aa5', '#ffb38a', '#c9a6ff', '#ff5c8a'];
+    for (let k = 0; k < n; k++) {
+      const e = document.createElement('i'); e.textContent = glyph[k % glyph.length];
+      const sz = t.bg == 'stars' ? rnd(8, 16) : rnd(14, 34);
+      e.style.cssText = `left:${rnd(2, 96)}%;font-size:${sz}px;color:${cols[k % cols.length]};--dx:${rnd(-60, 60)}px;--rot:${rnd(-50, 50)}deg;animation-duration:${t.bg == 'stars' ? rnd(2.5, 6) : rnd(9, 20)}s;animation-delay:${-rnd(0, 18)}s`;
+      if (t.bg == 'stars') e.style.top = rnd(2, 96) + '%';
+      bg.appendChild(e);
+    }
+  }
+  function skeleton() {
+    const l = document.getElementById('list'); if (!l || l.children.length) return;
+    l.innerHTML = Array.from({ length: 7 }, () => '<div class="sk"><i></i><div><b style="width:' + (40 + Math.random() * 30 | 0) + '%"></b><s></s></div></div>').join('');
+  }
+  function open() {
+    const t = get();
+    const o = (window.sheet || (() => null))(`<h3 style="margin-bottom:4px">Theme 🎨</h3><small style="color:var(--mut)">Home background</small><div class="thm">${Object.entries(BGS).map(([k, v]) => `<button data-b="${k}" class="${t.bg == k ? 'on' : ''}">${v}</button>`).join('')}</div><small style="color:var(--mut)">Accent colour</small><div class="acs">${ACC.map(([n, c]) => `<button data-c="${c}" aria-label="${n}" style="background:${c}" class="${t.ac == c ? 'on' : ''}"></button>`).join('')}</div>`);
+    if (!o) return;
+    const save = v => { localStorage.setItem(KEY, JSON.stringify({ ...get(), ...v })); build(); o.querySelectorAll('[data-b]').forEach(b => b.classList.toggle('on', b.dataset.b == get().bg)); o.querySelectorAll('[data-c]').forEach(b => b.classList.toggle('on', b.dataset.c == get().ac)) };
+    o.querySelectorAll('[data-b]').forEach(b => b.onclick = () => save({ bg: b.dataset.b }));
+    o.querySelectorAll('[data-c]').forEach(b => b.onclick = () => save({ ac: b.dataset.c }));
+  }
+  document.addEventListener('visibilitychange', () => bg && bg.classList.toggle('pz', document.hidden));
+  // no animation work while the home screen is covered by an open chat
+  try { new IntersectionObserver(es => { if (bg) bg.classList.toggle('pz', !es[0].isIntersecting || document.hidden) }, { threshold: 0.05 }).observe(document.querySelector('.side')) } catch {}
+  window.THEME = { open, build };
+  build(); skeleton();
+})();
+
+</script>
+<script>
+// LYNKO CHAT — auto error / bug fix.
+// 1) the app is watched: a burst of script errors, or a page that never finishes starting, triggers a safe self-repair
+// 2) "🛠 Fix problems" in the ⋮ menu runs the same repair by hand
+// The repair NEVER touches your login, your keys, saved chats (offline.js) or saved media — it only resets the app files (service worker + shell cache) and reloads.
+// Errors are reported to the admin panel by install.js, so you can see what broke.
+(function () {
+  const K = 'lk_heal', say = t => { try { typeof toast == 'function' ? toast(t) : 0 } catch {} };
+  const hist = () => { try { return (JSON.parse(localStorage.getItem(K) || '[]')).filter(t => Date.now() - t < 18e5) } catch { return [] } };
+  const canAuto = () => hist().length < 2 && navigator.onLine !== false;   // at most 2 automatic repairs per 30 min: never a reload loop
+  const mark = () => { try { localStorage.setItem(K, JSON.stringify([...hist(), Date.now()])) } catch {} };
+
+  async function repair() {
+    try { const rs = await navigator.serviceWorker.getRegistrations(); await Promise.all(rs.map(r => r.unregister())) } catch {}
+    try { for (const k of await caches.keys()) if (/^lynko-(shell|ext)/.test(k)) await caches.delete(k) } catch {}
+    try { await navigator.serviceWorker.register('/sw.js') } catch {}
+  }
+  async function run(manual) {
+    if (manual && navigator.onLine === false) return say('You are offline — your saved chats are safe, nothing to fix');
+    if (manual) say('Fixing… the app will restart');
+    await repair(); mark();
+    setTimeout(() => { try { sessionStorage.setItem('lk_reload', '1') } catch {} location.reload() }, manual ? 700 : 100);
+  }
+  window.HEAL = { run, repair };
+
+  // burst of errors -> repair
+  const hits = [];
+  const bad = msg => { msg = String(msg || ''); return !/ResizeObserver|Script error\.?$|Non-Error promise rejection|AbortError|NetworkError|Failed to fetch|Load failed|The user aborted/i.test(msg) };
+  const note = msg => {
+    if (!bad(msg)) return; const n = Date.now(); hits.push(n); while (hits.length && n - hits[0] > 15e3) hits.shift();
+    if (hits.length >= 6 && canAuto()) { hits.length = 0; run(false) }
+  };
+  addEventListener('error', e => { if (e.target && e.target !== window) return; note(e.message) });   // resource (image) failures are ignored
+  addEventListener('unhandledrejection', e => note(e.reason && e.reason.message || e.reason));
+
+  // the chat page never started (white screen) -> repair
+  if (location.pathname == '/chat') setTimeout(() => {
+    const loggedIn = localStorage.getItem('lynko_enc') && sessionStorage.getItem('lynko_priv');   // locked app waiting for the password is not a fault
+    if (!window.__lynkoReady && loggedIn && canAuto() && !(window.OFF && !OFF.online)) run(false);
+  }, 20000);
+})();
+
 </script>
 </body>
 </html>
