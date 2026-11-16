@@ -129,6 +129,7 @@ input:focus{border-color:var(--rose)}
 .ring.un,.ring.mine{background:linear-gradient(135deg,var(--peach),var(--rose) 55%,var(--lilac))}.ring.none{background:none}
 .ring .av{border:2px solid #1d0817;box-sizing:content-box}
 .ring .plus{position:absolute;right:-2px;bottom:-2px;width:22px;height:22px;border-radius:50%;background:linear-gradient(135deg,var(--rose),#c14bff);display:grid;place-items:center;font-weight:700;border:2px solid #1d0817;font-size:15px;line-height:1}
+.cmpb{position:absolute;left:0;right:0;bottom:84px;text-align:center;color:#fff;font-size:14px;text-shadow:0 1px 6px #000}
 .upp{position:absolute;top:6px;right:8px;background:#000b;border-radius:10px;padding:2px 8px;font-size:12px;z-index:2}.upp:empty{display:none}.row{touch-action:pan-y}.tr-t{white-space:pre-wrap;line-height:1.5;margin:10px 0 14px;font-size:17px}
 .comp{gap:8px;padding:8px 8px calc(8px + env(safe-area-inset-bottom))}
 .pill{border-radius:26px;padding:0 6px 0 2px;align-items:flex-end;background:rgba(255,255,255,.09);border-color:rgba(255,255,255,.08)}
@@ -275,7 +276,7 @@ input:-webkit-autofill,textarea:-webkit-autofill{-webkit-box-shadow:0 0 0 100px 
   const live = m => Date.now() - new Date(m.ts) < KEEP;
 
   // ── what is worth saving ──
-  const SAVE = /^\/api\/(me|config|chats|messages|statuses|official|calls)(\?|$)/;
+  const SAVE = /^\/api\/(me|config|chats|messages|statuses|official|calls|groups)(\?|$)/;
   const ok = url => SAVE.test(url);
   const parts = url => { const u = new URL(url, location.origin); return { path: u.pathname, w: u.searchParams.get('with'), after: u.searchParams.get('after') } };
 
@@ -408,19 +409,20 @@ const b64=b=>{let s='',u=new Uint8Array(b);for(let i=0;i<u.length;i+=32768)s+=St
 const unb64=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
 const toast=t=>{const d=document.createElement('div');d.className='toast';d.textContent=t;document.body.appendChild(d);setTimeout(()=>d.remove(),2400)};
 async function api(url,method='GET',body){
-  const get=method=='GET',keep=get&&OFF.ok(url);let r;
+  const get=method=='GET',keep=get&&OFF.ok(url),gx=window.GX?GX.map(url,method,body):null,fu=gx?gx.url:url,fm=gx?gx.method:method,fb=gx?gx.body:body;let r;
   try{
     const ac=new AbortController(),tm=keep?setTimeout(()=>ac.abort(),15000):0;   // slow / half-dead network -> saved copy after 15 s
-    try{r=await fetch(url,{method,headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined,signal:ac.signal})}finally{clearTimeout(tm)}
+    try{r=await fetch(fu,{method:fm,headers:fb?{'Content-Type':'application/json'}:{},body:fb?JSON.stringify(fb):undefined,signal:ac.signal})}finally{clearTimeout(tm)}
   }catch(e){
     OFF.net(false);
     if(keep){const d=await OFF.read(url);if(d!==undefined)return d}
     const x=new Error(get?'You are offline':'No internet');x.net=true;throw x}
   OFF.net(true);
   if(r.status==401){leave();throw new Error('auth')}
-  const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'Error');
+  let d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'Error');
+  if(gx&&gx.post)d=gx.post(d);
   if(keep)OFF.save(url,d);return d}
-function leave(){['lynko_priv','lynko_enc'].forEach(k=>localStorage.removeItem(k));sessionStorage.removeItem('lynko_priv');try{OFF.wipe()}catch{}(window.caches?caches.delete('lynko-api-v2'):Promise.resolve()).catch(()=>{}).finally(()=>{location.href='/'})}
+function leave(){['lynko_priv','lynko_enc','lk_bio'].forEach(k=>localStorage.removeItem(k));try{indexedDB.deleteDatabase('lynko-bio')}catch{}sessionStorage.removeItem('lynko_priv');try{OFF.wipe()}catch{}(window.caches?caches.delete('lynko-api-v2'):Promise.resolve()).catch(()=>{}).finally(()=>{location.href='/'})}
 
 let me,priv,cur=null,contacts=new Map(),chats=new Map(),msgs=[],seen=new Set(),keys={},urls={},pl=new Map(),unlocked=new Set(),lastDay='',tc=0,typingT={},lastTy=0;
 const hm=t=>new Date(t).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
@@ -432,7 +434,8 @@ const sha=async s=>hex(await crypto.subtle.digest('SHA-256',enc.encode(s)));
 // ── crypto (ECDH → AES-GCM, keys cached per friend) ──
 async function shared(id){
   if(keys[id])return keys[id];
-  const pub=await crypto.subtle.importKey('jwk',JSON.parse((id==me.id?me:contacts.get(id)).pub),{name:'ECDH',namedCurve:'P-256'},false,[]);
+  if(window.GX&&GX.is(id)){const raw=GX.raw.get(id.slice(2));if(!raw)throw new Error('no group key');return keys[id]=await crypto.subtle.importKey('raw',raw,'AES-GCM',false,['encrypt','decrypt'])}
+  const pub=await crypto.subtle.importKey('jwk',JSON.parse((id==me.id?me:(contacts.get(id)||(window.GX&&GX.users.get(id)))).pub),{name:'ECDH',namedCurve:'P-256'},false,[]);
   return keys[id]=await crypto.subtle.deriveKey({name:'ECDH',public:pub},priv,{name:'AES-GCM',length:256},false,['encrypt','decrypt']);
 }
 async function seal(id,data){const iv=crypto.getRandomValues(new Uint8Array(12));
@@ -440,7 +443,7 @@ async function seal(id,data){const iv=crypto.getRandomValues(new Uint8Array(12))
 const open=async(id,iv,ct)=>crypto.subtle.decrypt({name:'AES-GCM',iv:unb64(iv)},await shared(id),ct);
 async function payload(m){
   if(pl.has(m.id))return pl.get(m.id);
-  const peer=m.from==me.id?m.to:m.from;let p;
+  const peer=m.gid?'g:'+m.gid:m.from==me.id?m.to:m.from;let p;
   try{p=JSON.parse(dec.decode(await open(peer,m.iv,unb64(m.ct))))}catch{p={k:'text',v:'🔒 Couldn’t decrypt this message'}}
   pl.set(m.id,p);try{OFF.warm(m,p)}catch{}return p}
 
@@ -514,7 +517,9 @@ function paintMe(){$('meb').innerHTML=av(me)}
 
 // ── Lynko Official (verified, read-only; plain text from the admin panel) ──
 const VF='<svg class="vf" viewBox="0 0 24 24" aria-label="Verified"><polygon points="12.00,1.00 13.89,2.49 16.21,1.84 17.39,3.93 19.78,4.22 20.07,6.61 22.16,7.79 21.51,10.11 23.00,12.00 21.51,13.89 22.16,16.21 20.07,17.39 19.78,19.78 17.39,20.07 16.21,22.16 13.89,21.51 12.00,23.00 10.11,21.51 7.79,22.16 6.61,20.07 4.22,19.78 3.93,17.39 1.84,16.21 2.49,13.89 1.00,12.00 2.49,10.11 1.84,7.79 3.93,6.61 4.22,4.22 6.61,3.93 7.79,1.84 10.11,2.49" fill="#2f9bff" stroke="#2f9bff" stroke-width="1.4" stroke-linejoin="round"/><path d="M7.6 12.4l3 3 5.8-6.2" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-const offAv=(cls='')=>`<div class="av ${cls}"><img src="/img/official.jpg${window.LOGOV?'?v='+window.LOGOV:''}" alt="" onerror="this.onerror=null;this.src='/icons/icon-192.png'"></div>`;
+const offAv=(cls='')=>`<div class="av ${cls}"><img src="/img/official.jpg${window.LOGOV?'?v='+window.LOGOV:''}" alt="" data-fb="/icons/icon-192.png"></div>`;
+// (no inline event handlers: the page runs under a strict script CSP) a broken image swaps to its data-fb picture once
+addEventListener('error',e=>{const t=e.target;if(t&&t.tagName=='IMG'&&t.dataset&&t.dataset.fb&&!t.dataset.fbd){t.dataset.fbd=1;t.src=t.dataset.fb}},true);
 let off={list:[],unread:0};
 function linkify(el,txt){
   txt.split(/(https?:\/\/[^\s<]+)/g).forEach((part,i)=>{
@@ -560,9 +565,9 @@ const pvText=p=>p.k=='text'?(p.st?'🧸 Sticker':p.v):p.k=='aud'?'🎤 Voice mes
 async function setLast(peer,m,unread,live){
   const p=await payload(m),old=chats.get(peer)||{};
   const u=unread!==undefined?unread:(live&&m.from!=me.id?(old.unread||0)+1:old.unread||0);
-  chats.set(peer,{m,txt:pvText(p),unread:peer==cur&&!document.hidden?0:u})}
+  chats.set(peer,{m,txt:(window.GX&&GX.is(peer)&&m.from!=me.id?GX.who(m.from)+': ':'')+pvText(p),unread:peer==cur&&!document.hidden?0:u})}
 async function loadChats(){const d=await api('/api/chats');await Promise.all(d.map(x=>setLast(x.peer,x.last,x.unread)));renderList()}
-async function loadContacts(){const d=await api('/api/me');Object.assign(me,{about:d.about,dpv:d.dpv});contacts=new Map(d.contacts.map(c=>[c.id,nick(c)]));paintMe();renderList();warmBanners()}
+async function loadContacts(){const d=await api('/api/me');Object.assign(me,{about:d.about,dpv:d.dpv});contacts=new Map(d.contacts.map(c=>[c.id,nick(c)]));if(window.GX)GX.inject();paintMe();renderList();warmBanners()}
 // banners are only opened from Contact info: fetch them quietly in the background (service worker keeps them)
 const warmed=new Set();
 function warmBanner(c){if(!c||!c.bnv||!window.fetch)return;const u=`/api/banner/${c.id}?v=${c.bnv}`;if(warmed.has(u))return;warmed.add(u);fetch(u).catch(()=>warmed.delete(u))}
@@ -587,6 +592,7 @@ function renderList(){
   document.title=(tot?`(${tot}) `:'')+'Lynko';
   if(tab=='status')return renderStatus();
   if(tab=='calls')return F.renderCalls();
+  if(tab=='contacts')return window.V2&&V2.contacts();
   if(flt=='locked'&&!LOCK.chat.isOpen()){l.innerHTML='<div class="empty">🔒 Locked chats<br><button class="btn p" id="lkopen" style="margin-top:14px;max-width:220px">Unlock</button></div>';$('lkopen').onclick=async()=>{if(await LOCK.chat.gate())renderList()};return}
   if(flt=='locked'&&!LOCK.chat.count()){l.innerHTML='<div class="empty">No locked chats yet.<br>Open a chat → ⋮ → Lock this chat</div>';l.appendChild(lockNowRow());return}
   if(flt!='locked'&&LOCK.chat.isOpen()&&!(cur&&LOCK.chat.has(cur)))LOCK.chat.relock();
@@ -618,7 +624,7 @@ function renderList(){
 }
 
 // ── open / close chat ──
-function setSub(){const c=contacts.get(cur);if(!c)return;const s=$('hs');
+function setSub(){const c=contacts.get(cur);if(!c)return;const s=$('hs');if(c.group){s.className='';s.textContent=c.about;return}
   if(typingT[cur]){s.textContent='typing…';s.className='ty'}else{const pr=F.pres(cur);s.className=pr=='online'?'on':'';s.textContent=c.bot?'@'+c.handle+' · bot':pr||c.about||'End-to-end encrypted · clears in 24h'}}
 let openTok=0;
 const mcache=new Map(),live24=m=>Date.now()-new Date(m.ts)<864e5;   // chats seen this session open instantly
@@ -640,7 +646,7 @@ async function openChat(id){
   try{clearReply()}catch{}const first=!cur,tok=++openTok;cur=id;msgs=[];seen=new Set();lastDay='';warmBanner(contacts.get(id));
   history[first?'pushState':'replaceState']({c:1},'');
   $('app').classList.add('chatting');['head','msgs','comp'].forEach(x=>$(x).hidden=false);$('none').hidden=true;
-  const c=contacts.get(id);$('hn').textContent=c.username;$('hav').innerHTML=av(c);F.typingStop();setSub();F.hdr();
+  const c=contacts.get(id);$('hn').textContent=c.username;$('hav').innerHTML=av(c);F.typingStop();setSub();F.hdr();if(c.group)$('hcall').hidden=true;
   $('msgs').innerHTML='';$('msgs').style.scrollBehavior='auto';const ch=chats.get(id);if(ch)ch.unread=0;renderList();
   micVis();shared(id).catch(()=>{});   // derive the encryption key now so your first send has zero wait
   const cached=(mcache.get(id)||[]).filter(m=>live24(m)&&pl.has(m.id));
@@ -687,7 +693,7 @@ function press(b,fn){let t;const c=()=>clearTimeout(t);
   b.addEventListener('contextmenu',e=>{e.preventDefault();c();if(!b._lp){b._lp=1;fn()}})}
 async function getMedia(m,p){
   if(urls[m.id])return urls[m.id];
-  const peer=m.from==me.id?m.to:m.from,r=await fetch('/api/blob/'+m.id);if(!r.ok)throw 0;
+  const peer=m.gid?'g:'+m.gid:m.from==me.id?m.to:m.from,r=await fetch((m.gid?'/api/gblob/':'/api/blob/')+m.id);if(!r.ok)throw 0;
   const buf=await open(peer,r.headers.get('X-IV'),await r.arrayBuffer());
   return urls[m.id]=URL.createObjectURL(new Blob([buf],{type:/^(audio|image|video)\/[\w.+-]+$/.test(p.mime||'')?p.mime:''}))}
 function lightbox(u){const o=document.createElement('div');o.className='ov lb';o.innerHTML='<img>';o.firstChild.src=u;o.onclick=()=>o.remove();document.body.appendChild(o)}
@@ -740,6 +746,7 @@ function paint(m,p,into){
   const dl=new Date(m.ts).toDateString();if(dl!=lastDay){lastDay=dl;const c=document.createElement('div');c.className='sys';c.textContent=dayLbl(m.ts);box.appendChild(c)}
   const r=document.createElement('div');r.className='row '+(mine?'me':'them');r.id='m'+m.id;r._m=m;
   const b=document.createElement('div');b.className='b';r.appendChild(b);
+  if(m.gid&&!mine){const gn=document.createElement('div');gn.className='gsn';gn.textContent=GX.who(m.from);gn.style.color=GX.col(m.from);b.appendChild(gn)}
   if(p.k=='text'&&p.st&&window.STK&&STK.has(p.st)){b.classList.add('stk');b.appendChild(STK.el(p.st))}
   else if(p.k=='text'){
     if(p.re){const q=document.createElement('div'),th=safeTh(p.re.th);q.className='qt';q.innerHTML=(th?'<img alt="">':'')+'<div><b></b><span></span></div>';
@@ -785,7 +792,7 @@ function menu(id){
   document.body.appendChild(o)}
 function setRx(id,rx){const m=msgs.find(x=>x.id==id);if(m){m.rx=rx;rxEl($('m'+id))}}
 async function react(id,e,el){
-  const m=msgs.find(x=>x.id==id);if(!m||m.pending)return;
+  const m=msgs.find(x=>x.id==id);if(!m||m.pending)return;if(m.gid)return toast('Reactions aren’t available in groups yet');
   try{const d=await api('/api/react','POST',{id,e});setRx(id,d.rx);if(d.rx[me.id]=='❤️'){const r=(el||$('m'+id))?.getBoundingClientRect();burst(r?r.left+r.width/2:undefined,r?r.top:undefined)}}catch(x){toast(x.message)}}
 
 // ── sending: instant bubble first, network after ──
@@ -820,10 +827,10 @@ async function deliver(kind,p,bytes,local,to){
     if(e&&e.net){outbox.push(go);if(!deliver._t||Date.now()-deliver._t>4000){deliver._t=Date.now();toast('Waiting for internet — it will send by itself')}return}   // bubble stays with the clock icon
     $('m'+m.id)?.remove();drop();seen.delete(m.id);toast('Not sent: '+e.message)}
 }
-async function mediaBytes(m){const peer=m.from==me.id?m.to:m.from,r=await fetch('/api/blob/'+m.id);if(!r.ok)throw 0;return open(peer,r.headers.get('X-IV'),await r.arrayBuffer())}
+async function mediaBytes(m){const peer=m.gid?'g:'+m.gid:m.from==me.id?m.to:m.from,r=await fetch((m.gid?'/api/gblob/':'/api/blob/')+m.id);if(!r.ok)throw 0;return open(peer,r.headers.get('X-IV'),await r.arrayBuffer())}
 function forwardMsg(id){
   const m=msgs.find(x=>x.id==id),p=pl.get(id);if(!m||!p||m.pending)return;
-  const list=[...contacts.values()].filter(c=>!c.bot&&c.id!=cur);if(!list.length)return toast('No other contacts to forward to');
+  const list=[...contacts.values()].filter(c=>!c.bot&&!c.group&&c.id!=cur);if(!list.length)return toast('No other contacts to forward to');
   const o=sheet('<h3 style="margin-bottom:6px">Forward to…</h3><div class="fwl"></div>');
   list.forEach(c=>{const b=document.createElement('button');b.className='mi';b.textContent=c.username;b.onclick=async()=>{o.remove();
     try{if(p.k=='text')deliver('text',{k:'text',v:p.v},null,null,c.id);
@@ -850,7 +857,7 @@ function searchChat(){
       b.onclick=()=>{o.remove();const el=$('m'+m.id);if(el){el.scrollIntoView({block:'center',behavior:'smooth'});el.classList.add('hl');setTimeout(()=>el.classList.remove('hl'),1500)}};r.appendChild(b)})}}
 let rpl=null;
 function setReply(id){const m=msgs.find(x=>x.id==id),p=pl.get(id);if(!m||!p||m.pending)return;
-  const who=m.from==me.id?'You':((contacts.get(m.from)||{}).username||''),
+  const who=m.from==me.id?'You':(m.gid?GX.who(m.from):((contacts.get(m.from)||{}).username||'')),
     t=p.k=='text'?(p.st?'🧸 Sticker':p.v):p.k=='aud'?'🎤 Voice message':(p.k=='img'?'📷 ':'🎥 ')+(p.cap||(p.k=='img'?'Photo':'Video'));
   rpl={mid:id,who,t:String(t).slice(0,80),th:p.k=='img'||p.k=='vid'?safeTh(p.th):''};
   const b=$('rpb');b.hidden=false;b.querySelector('b').textContent=who||'Reply';b.querySelector('span').textContent=rpl.t;$('txt').focus({preventScroll:true})}
@@ -906,16 +913,18 @@ const prepVid=f=>new Promise(res=>{
 const MAXV=16;   // MB
 function pickMedia(f,mode='chat'){
   if(!f||(mode=='chat'&&!cur))return;const img=f.type.startsWith('image/'),vid=f.type.startsWith('video/');
-  if(!img&&!vid)return toast('Only photos and videos');if(vid&&f.size>MAXV*1048576)return toast('Video must be under '+MAXV+' MB');
-  const job=(img?prepImg(f):prepVid(f)).catch(()=>null),k=img?'img':'vid';   // starts compressing while you type the caption
+  if(!img&&!vid)return toast('Only photos and videos');if(vid&&f.size>(V2.canComp?80:MAXV)*1048576)return toast('Video must be under '+(V2.canComp?80:MAXV)+' MB');
+  const ab={x:0};let cprog=null,jdone=false;
+  const job=(img?prepImg(f):V2.vid(f,p=>{cprog&&cprog(p)},ab)).catch(()=>null).finally(()=>{jdone=true}),k=img?'img':'vid';   // starts compressing while you type the caption
   const o=document.createElement('div');o.className='ov pvw';
-  o.innerHTML='<button class="x">✕</button><div class="st"></div><div class="cb"><input placeholder="Add a caption…" maxlength="300"><button class="send">➤</button></div>';
+  o.innerHTML='<button class="x">✕</button><div class="st"></div><div class="cmpb" hidden></div><div class="cb"><input placeholder="Add a caption…" maxlength="300"><button class="send">➤</button></div>';
+  cprog=p=>{const c=o.querySelector('.cmpb');c.hidden=false;c.textContent='Making the video smaller… '+Math.round(p*100)+'%'};
   const pu=URL.createObjectURL(f),el=document.createElement(img?'img':'video');el.src=pu;if(vid){el.controls=true;el.playsInline=true;el.muted=true}
   o.querySelector('.st').appendChild(el);document.body.appendChild(o);
   const close=()=>{o.remove();setTimeout(()=>URL.revokeObjectURL(pu),500)};
-  o.querySelector('.x').onclick=close;
+  o.querySelector('.x').onclick=()=>{ab.x=1;close()};
   o.querySelector('.send').onclick=async()=>{
-    const cap=o.querySelector('input').value.trim();close();const r=await job;if(!r)return toast('Could not read this file');
+    const cap=o.querySelector('input').value.trim();close();if(!jdone&&vid)toast('Making the video smaller… it sends by itself');const r=await job;if(!r)return toast('Could not read this file');
     const p={k,mime:r.blob.type||f.type,w:r.w,h:r.h,d:r.d,th:r.th,cap,size:r.blob.size},bytes=await r.blob.arrayBuffer();
     if(mode=='status')return doPost(p,bytes);
     deliver(k,p,bytes,URL.createObjectURL(r.blob))}}
@@ -1006,8 +1015,8 @@ function renderStatus(){
   sec('Recent updates',oth.filter(x=>x.un));sec('Viewed updates',oth.filter(x=>!x.un));
   if(!oth.length){const e=document.createElement('div');e.className='empty';e.innerHTML='No updates yet.<br>Statuses from your chats show up here and disappear after 24 hours.';l.appendChild(e)}}
 function setTab(t){
-  tab=t;$('n1').classList.toggle('on',t=='chats');$('n4').classList.toggle('on',t=='status');$('n5').classList.toggle('on',t=='calls');
-  $('srch').hidden=$('chips').hidden=t!='chats';
+  tab=t;$('n1').classList.toggle('on',t=='chats');$('n4').classList.toggle('on',t=='status');$('n5').classList.toggle('on',t=='calls');const n6=$('n6');if(n6)n6.classList.toggle('on',t=='contacts');
+  $('srch').hidden=!(t=='chats'||t=='contacts');$('chips').hidden=t!='chats';try{V2.title()}catch{}
   if(t=='status')loadStatuses().catch(()=>{});if(t=='calls')F.loadCalls();renderList()}
 function addStatus(){items([['🖼 Photo / video',()=>$('fs').click()],['📷 Camera',()=>$('fsc').click()],['✏️ Text',textStatus]])}
 $('fs').onchange=$('fsc').onchange=e=>{pickMedia(e.target.files[0],'status');e.target.value=''};
@@ -1108,6 +1117,8 @@ function setHtml(){
       +`<label class="sr"><span class="si" style="background:#ff9f0a">⏱</span><span class="st">Lock app</span><select data-k="after"><option value="never">Never</option><option value="now">Right away</option><option value="1m">After 1 minute</option><option value="10m">After 10 minutes</option></select></label>`
       +sSw('🫥','#5856d6','Hide app preview','shield',{on:LOCK.shield.get(),sub:'Blank screen in the app switcher'}),
       'Never = the app opens straight away. Pick a time to ask your password again after you leave the app.')
+    +sGrp(sRow('🔑','#34c759','Recovery key',{a:'rec',val:me.rec?'On':'Off'})+sRow('📱','#0a84ff','Devices',{a:'dev'})+((window.BIO&&V2.bioOK)?sSw('🧬','#ff9f0a','Fingerprint / Face unlock','bio',{on:BIO.on(),sub:'Open the app without typing your password'}):''),'The recovery key lets you reset a forgotten password yourself. Devices shows where your account is logged in.')
+    +sGrp(sRow('🎵','#ff375f','Ringtone & sounds',{a:'ring'})+sRow('🎨','#af52de','Theme',{a:'theme'})+sRow('🛟','#ff9f0a','Contact admin / Report a problem',{a:'sup'}))
     +(rs===true?sGrp(sSw('🛡','#0a84ff','Protect IP address in calls','relay',{on:F.relayGet(),sub:'Relays calls through Lynko so your IP stays hidden'}),CALLNOTE):`<div class="sf">${CALLNOTE}</div>`)   // row only appears when the server really has a relay (no more \"not available\" error text)
     +(isInstalled()?'':sGrp(sRow('📲','#0a84ff','Install app',{a:'install',sub:'Add LYNKO CHAT to your home screen — opens like a normal app'})))
     +sGrp(sRow('🔔','#ff3b30','Notifications',{a:'notif',val:nv})
@@ -1139,6 +1150,7 @@ async function onSetClick(e){
   else if(a=='wall')wallpaper();
   else if(a=='apk'){if(window.lynkoInstall)lynkoInstall()}
   else if(a=='help')LX.help();
+  else if(a=='rec')V2.recovery();else if(a=='dev')V2.devices();else if(a=='ring')V2.ringtone();else if(a=='theme')THEME.open();else if(a=='sup')V2.support();
   else if(a=='terms'||a=='privacy')LX.legal(a);
   else if(a=='add'){o.remove();addContact()}
   else if(a=='id'){navigator.clipboard?.writeText(me.id);toast('ID copied')}
@@ -1147,6 +1159,7 @@ async function onSetChange(e){
   const t=e.target,k=t.dataset.k;if(!k)return;
   if(k=='seen'){try{await api('/api/profile','POST',{hideSeen:t.checked});me.hideSeen=t.checked;toast(t.checked?'Last seen hidden':'Last seen visible')}catch(x){t.checked=!t.checked;toast(x.message)}}
   else if(k=='shield')LOCK.shield.set(t.checked);
+  else if(k=='bio')V2.bioToggle(t);
   else if(k=='relay')F.relaySet(t.checked);
   else if(k=='ai')F.aiToggle(t.checked);
   else if(k=='after')LOCK.setAfter(t.value);
@@ -1164,7 +1177,7 @@ $('n1').onclick=()=>{if(tab!='chats')setTab('chats');else $('list').scrollTo({to
 $('menub').onclick=()=>items([['⚙️ Settings',()=>settings()],['👤 Profile & About',profile],['🔔 Notifications',F.notifOn],['🖼 Wallpaper',wallpaper],['🎨 Theme',()=>window.THEME&&THEME.open()],['➕ Add contact',addContact],['🛠 Fix problems',()=>window.HEAL&&HEAL.run(true)],['⎋ Log out',async()=>{await fetch('/api/logout',{method:'POST'});leave()}]]);
 $('hav').onclick=()=>{if(cur=='official'){const o=sheet(`<div class="pf">${offAv('big')}<h3 style="margin:0">Lynko Official${VF}</h3><p style="color:var(--mut);text-align:center">Official news and updates from the Lynko team.<br>You can’t reply in this channel.</p></div>`);return}const c=contacts.get(cur);if(!c)return;
   LX.contact(c,{avatar:av(c,'big'),locked:LOCK.chat.has(c.id),rename:()=>renameContact(c.id),lock:()=>LOCK.chat.toggle(c.id),call:()=>F.callStart(c.id)})};
-$('hmenu').onclick=()=>cur=='ai'?items([['🖼 Wallpaper',wallpaper],['🧹 Clear AI chat',F.aiClear]]):cur=='official'?items([['🖼 Wallpaper',wallpaper]]):items([['✏️ Rename contact',()=>renameContact(cur)],[pinned(cur)?'📌 Unpin chat':'📌 Pin chat',()=>togglePin(cur)],['🔍 Search in chat',searchChat],['🖼 Wallpaper',wallpaper],[LOCK.chat.has(cur)?'🔓 Unlock this chat':'🔒 Lock this chat',()=>LOCK.chat.toggle(cur)]]);
+$('hmenu').onclick=()=>window.GX&&GX.is(cur)?GX.menu():cur=='ai'?items([['🖼 Wallpaper',wallpaper],['🧹 Clear AI chat',F.aiClear]]):cur=='official'?items([['🖼 Wallpaper',wallpaper]]):items([['✏️ Rename contact',()=>renameContact(cur)],[pinned(cur)?'📌 Unpin chat':'📌 Pin chat',()=>togglePin(cur)],['🔍 Search in chat',searchChat],['🖼 Wallpaper',wallpaper],[LOCK.chat.has(cur)?'🔓 Unlock this chat':'🔒 Lock this chat',()=>LOCK.chat.toggle(cur)]]);
 document.addEventListener('visibilitychange',()=>{
   if(document.hidden)recCancel();
   if(document.hidden&&cur&&LOCK.chat.has(cur)){closeChat()}
@@ -1178,7 +1191,7 @@ document.addEventListener('visibilitychange',()=>{
   priv=await crypto.subtle.importKey('jwk',JSON.parse(pj),{name:'ECDH',namedCurve:'P-256'},false,['deriveKey']);
   contacts=new Map(me.contacts.map(c=>[c.id,nick(c)]));paintMe();applyWp();try{renderList()}catch(e){console.error(e)}warmBanners();loadChats().catch(()=>{}).then(ackAll);loadStatuses().catch(()=>{});loadOfficial().catch(()=>{});
   window.__lynkoReady=1;
-  let rt=null,tick=0;const rtOK=()=>!!(rt&&rt.connection&&rt.connection.state=='connected');
+  let rt=null,tick=0;const rtOK=()=>!!(rt&&rt.connection&&rt.connection.state=='connected');window.__rtOK=rtOK;window.__rtWant=!!(cfg&&cfg.key);
   const startRT=()=>{if(rt||typeof Pusher==='undefined'||!cfg||!cfg.key)return;
   const ps=rt=new Pusher(cfg.key,{cluster:cfg.cluster,channelAuthorization:{endpoint:'/api/pusher/auth'}}),ch=ps.subscribe('private-u-'+me.id);
   ch.bind('msg',async d=>{
@@ -1193,6 +1206,18 @@ document.addEventListener('visibilitychange',()=>{
     if(live){await addMsg(d,true);if(d.from!=me.id)markRead()}
     else if(d.from!=me.id&&peer!=cur)navigator.vibrate?.(20);
     if(!live&&d.from!=me.id)F.notify(peer,d);renderList()});
+  ch.bind('gmsg',async d=>{
+    const peer='g:'+d.gid;d.to=peer;GX.fixM(d);
+    if(d.from==me.id&&d.tmp&&seen.has(d.tmp))return;
+    if(!GX.groups.has(d.gid))await GX.load();
+    if(!d.ct){peer==cur?pull():GX.load();return}
+    OFF.addMsg(peer,d);const live=peer==cur&&!document.hidden;
+    await setLast(peer,d,undefined,true);
+    if(live){await addMsg(d,true);if(d.from!=me.id)markRead()}
+    else if(d.from!=me.id)navigator.vibrate?.(20);
+    renderList()});
+  ch.bind('gdel',d=>{OFF.delMsg(d.id);const i=msgs.findIndex(m=>m.id==d.id);if(i>-1)msgs.splice(i,1);$('m'+d.id)?.remove();GX.load()});
+  ch.bind('ggrp',()=>GX.load());
   ch.bind('del',d=>{OFF.delMsg(d.id);const i=msgs.findIndex(m=>m.id==d.id);if(i>-1)msgs.splice(i,1);$('m'+d.id)?.remove();mcache.forEach((a,k)=>mcache.set(k,a.filter(m=>m.id!=d.id)));loadChats().catch(()=>{})});
   ch.bind('read',d=>{msgs.forEach(m=>{if(m.from==me.id&&m.to==d.by&&!m.pending&&!m.r){m.r=m.d=true;tickEl($('m'+m.id))}});mcache.forEach(a=>a.forEach(m=>{if(m.from==me.id&&m.to==d.by&&!m.pending)m.r=m.d=true}));const c=chats.get(d.by);if(c&&c.m.from==me.id)c.m.r=c.m.d=true;renderList()});
   ch.bind('dlv',d=>setDlv(d.ids||[],d.by));
@@ -1204,7 +1229,7 @@ document.addEventListener('visibilitychange',()=>{
   oc.bind('odel',()=>loadOfficial().catch(()=>{}));
   oc.bind('cfg',d=>window.THEME&&THEME.setCfg(d));
   for(const ev of ['status','sview','sdel'])ch.bind(ev,()=>loadStatuses().catch(()=>{}));
-  ch.bind('prof',()=>loadContacts().then(()=>{if(cur)setSub()}).catch(()=>{}));
+  ch.bind('prof',()=>{keys={};loadContacts().then(()=>{if(cur)setSub()}).catch(()=>{})});
   OFF.onBack(()=>{if(cur)pull().catch(()=>{});loadChats().catch(()=>{}).then(ackAll);loadStatuses().catch(()=>{});loadOfficial().catch(()=>{})});
   let first=1;ps.connection.bind('connected',()=>{if(first){first=0;return}if(cur)pull();loadChats().catch(()=>{}).then(ackAll);loadStatuses().catch(()=>{});loadOfficial().catch(()=>{})});
   F.init({ps,ch,cfg});
@@ -1220,7 +1245,7 @@ document.addEventListener('visibilitychange',()=>{
     try{if(!document.hidden&&navigator.onLine!==false){
       tick++;const fast=!rtOK(),chat=cur&&cur!='ai'&&cur!='official';
       if(chat)await pull().catch(()=>{});                                          // open chat: every 1 s
-      if(tick%(fast?3:5)==0)await loadChats().catch(()=>{}).then(ackAll);          // chat list: every 3 s
+      if(tick%(fast?3:5)==0){await loadChats().catch(()=>{}).then(ackAll);if(window.GX)GX.load()}          // chat list: every 3 s
       if(tick%(fast?3:5)==1)await loadStatuses().catch(()=>{});                    // statuses: every 3 s
       if(tick%(fast?15:30)==2)loadOfficial().catch(()=>{});
       if(chat&&tick%(fast?10:30)==5)await syncFull().catch(()=>{})}}               // ticks / reactions / deletions
@@ -1272,18 +1297,19 @@ document.addEventListener('visibilitychange',()=>{
 // LYNKO CHAT — themes (Lynko Love · WhatsApp style · White Liquid), admin-controlled default + logo, romantic background, skeletons.
 // The admin picks the default theme (and may force it for everyone) in /admin → Appearance. Otherwise every user can choose their own in ⋮ → 🎨 Theme.
 (function () {
-  const KEY = 'lk_theme', CK = 'lk_appcfg', MODES = { love: ['Lynko Love 💕', 'Romantic dark, floating hearts'], wa: ['WhatsApp style', 'Dark teal, green accents'], liquid: ['White Liquid ✨', 'Light frosted-glass look'] };
+  const KEY = 'lk_theme', CK = 'lk_appcfg', MODES = { tg: ['Telegram style', 'Black, iOS blue, floating tab bar'], love: ['Lynko Love 💕', 'Romantic dark, floating hearts'], wa: ['WhatsApp style', 'Dark teal, green accents'], liquid: ['White Liquid ✨', 'Light frosted-glass look'] };
   const BGS = { love: 'Romantic hearts 💕', sakura: 'Sakura petals 🌸', stars: 'Starry night ✨', plain: 'Plain' };
   const ACC = [['Rose', '#ff5c8a'], ['Lilac', '#b28cff'], ['Peach', '#ff9a6a'], ['Sky', '#5cb8ff'], ['Mint', '#4fe0b0']];
-  const BAR = { love: '#1a0713', wa: '#111b21', liquid: '#eef2ff' };
+  const BAR = { tg: '#000000', love: '#1a0713', wa: '#111b21', liquid: '#eef2ff' };
   const J = (k, d) => { try { return Object.assign({}, d, JSON.parse(localStorage.getItem(k) || '{}')) } catch { return d } };
   const user = () => J(KEY, { mode: '', bg: 'love', ac: '#ff5c8a' });
-  let cfg = J(CK, { theme: 'love', force: false, logoV: 0 });
-  const eff = () => { const m = cfg.force ? cfg.theme : (user().mode || cfg.theme); return MODES[m] ? m : 'love' };
+  let cfg = J(CK, { theme: 'tg', force: false, logoV: 0 });
+  const eff = () => { const m = cfg.force ? cfg.theme : (user().mode || cfg.theme); return MODES[m] ? m : 'tg' };
   const lite = () => document.documentElement.classList.contains('lite');
 
-  const L = 'html:not([data-theme=wa]):not([data-theme=liquid])', W = 'html[data-theme=wa]', G = 'html[data-theme=liquid]';
+  const L = 'html[data-theme=love]', T = 'html[data-theme=tg]', W = 'html[data-theme=wa]', G = 'html[data-theme=liquid]';
   const DOODLE = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120' viewBox='0 0 120 120'%3E%3Cg fill='none' stroke='%23ffffff' stroke-opacity='.05' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='20' cy='22' r='7'/%3E%3Cpath d='M70 18l8 8m0-8l-8 8'/%3E%3Cpath d='M30 80q8-12 16 0t16 0'/%3E%3Crect x='84' y='70' width='14' height='14' rx='3'/%3E%3Cpath d='M12 104l6-6 6 6-6 6z'/%3E%3Cpath d='M92 24q6-8 12 0t-12 12z'/%3E%3C/g%3E%3C/svg%3E")`;
+  const TGDOODLE = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240' viewBox='0 0 240 240'%3E%3Cg fill='none' stroke='%237b6cff' stroke-opacity='.32' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M30 40c0-9 14-9 14 0 0-9 14-9 14 0 0 12-14 20-14 26-0-6-14-14-14-26z'/%3E%3Ccircle cx='120' cy='34' r='12'/%3E%3Cpath d='M114 34h12M120 28v12'/%3E%3Cpath d='M186 28l6 12 13 2-10 9 3 13-12-7-12 7 3-13-10-9 13-2z'/%3E%3Cpath d='M26 120q10-16 20 0t20 0'/%3E%3Crect x='96' y='100' width='32' height='24' rx='6'/%3E%3Ccircle cx='112' cy='112' r='6'/%3E%3Cpath d='M170 100c10 0 16 8 16 16s-6 16-16 16-16-8-16-16 6-16 16-16zm-6 12h2m8 0h2m-12 9q4 4 8 0'/%3E%3Cpath d='M40 176l16 28H24z'/%3E%3Cpath d='M100 190c0-12 24-12 24 0v8c0 8-24 8-24 0z'/%3E%3Cpath d='M170 182l8 8 14-16' stroke='%23ff7ab6'/%3E%3Ccircle cx='214' cy='210' r='8' stroke='%23ff7ab6'/%3E%3Cpath d='M20 222h28M62 214l10 10m0-10l-10 10'/%3E%3C/g%3E%3C/svg%3E") 0 0/180px`;
   const st = document.createElement('style');
   st.textContent = `
 /* ── Lynko Love (default) ── */
@@ -1304,6 +1330,78 @@ ${L} .side .nav{background:rgba(29,8,23,.9)!important}
 ${L} .side .item .n{border-bottom-color:rgba(255,255,255,.07)}
 ${L} .side .item:active{background:rgba(255,92,138,.12)}
 .lite #romBg i{animation:none!important;opacity:.28}
+
+
+/* ── Telegram style (iOS dark): black, blue, floating capsule tab bar, pill chat header ── */
+${T}{--rose:#3e88f7;--peach:#5aa2ff;--lilac:#7aa8ff;--txt:#ffffff;--mut:#8e8e93;--line:rgba(84,84,88,.45);--panel:#1c1c1e;color-scheme:dark}
+${T} body,${T} .side,${T} .main{background:#000}
+${T} .side{border-right:1px solid rgba(255,255,255,.08)}
+${T} #romBg{display:none}
+/* chat-list top bar */
+${T} .bar{background:transparent;display:grid;grid-template-columns:auto 1fr auto auto;align-items:center;gap:10px;padding:calc(10px + env(safe-area-inset-top)) 14px 6px}
+${T} .bar .lg{grid-column:2;justify-self:center;font:700 20px/1 -apple-system,BlinkMacSystemFont,'Inter','DM Sans',sans-serif;background:none;-webkit-text-fill-color:#fff;color:#fff;display:flex;align-items:center;gap:10px;letter-spacing:-.2px}
+${T} .bar .lg i{display:none}
+${T} .bar .lg .tgspin{width:20px;height:20px;border-radius:50%;border:2.5px solid rgba(62,136,247,.28);border-top-color:#3e88f7;animation:tgs .9s linear infinite}
+@keyframes tgs{to{transform:rotate(360deg)}}
+${T} #meb{grid-column:1;height:40px;min-width:60px;padding:0 18px;border-radius:20px;background:rgba(44,44,46,.92);border:1px solid rgba(255,255,255,.08);color:#fff;font:600 17px/1 -apple-system,'Inter',sans-serif;display:grid;place-items:center}
+${T} #meb *{display:none}
+${T} #meb::after{content:'Edit'}
+${T} #v2story{grid-column:3;width:44px;height:44px;border-radius:50%;background:rgba(44,44,46,.92);border:1px solid rgba(255,255,255,.08);color:#fff;display:grid;place-items:center}
+${T} #addb{grid-column:4;width:44px;height:44px;border-radius:50%;background:#3e88f7;box-shadow:none;color:#fff;display:grid;place-items:center;font-size:0}
+${T} #addb::before{content:'';width:22px;height:22px;background:center/contain no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 20h9'/%3E%3Cpath d='M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z'/%3E%3C/svg%3E")}
+${T} #menub{display:none}
+${T} .srch input{background:#1c1c1e;border:0;border-radius:14px;color:#fff}
+${T} .chips{display:none}
+${T} .item{padding:10px 16px}
+${T} .item .av{width:56px;height:56px;font-size:22px}
+${T} .item .n{border-bottom:.5px solid rgba(84,84,88,.5)}
+${T} .item b{font:600 17px/1.2 -apple-system,'Inter',sans-serif}
+${T} .item small,${T} .item .pv{color:#8e8e93;font-size:15px}
+${T} .item time{color:#8e8e93;font-size:14px}
+${T} .badge{background:#3e88f7;color:#fff;min-width:22px;height:22px;border-radius:11px;font-weight:600}
+${T} .item:active{background:rgba(255,255,255,.06)}
+/* floating capsule tab bar */
+${T} .nav{margin:0 14px calc(10px + env(safe-area-inset-bottom));height:68px;flex:none;padding:5px;border:1px solid rgba(255,255,255,.1);border-radius:36px;background:rgba(28,28,30,.86)!important;-webkit-backdrop-filter:blur(22px) saturate(1.6);backdrop-filter:blur(22px) saturate(1.6);display:grid;grid-template-columns:repeat(4,1fr);gap:2px;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+${T} .nav button{border-radius:30px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;color:#fff;font:600 12px/1 -apple-system,'Inter',sans-serif;position:relative}
+${T} .nav button i{width:30px;height:30px;display:grid;place-items:center;background:none!important;font-size:0}
+${T} .nav button i svg{width:28px;height:28px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+${T} .nav button.on{background:rgba(120,120,128,.28);color:#3e88f7}
+${T} .nav .dot{top:7px;right:calc(50% - 22px);border-color:#1c1c1e;background:#3e88f7}
+${T} .av{color:#fff}
+${T} ::placeholder{color:#8e8e93}
+/* chat screen */
+${T} .head{background:transparent;border:0;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:calc(8px + env(safe-area-inset-top)) 12px 6px;position:relative;z-index:5}
+${T} .head #back{order:0;width:44px;height:44px;border-radius:50%;background:rgba(40,40,42,.92);border:1px solid rgba(255,255,255,.1);color:#fff;font-size:0;display:grid;place-items:center;flex:none}
+${T} .head #back::before{content:'';width:22px;height:22px;background:center/contain no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fff' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M15 5l-7 7 7 7'/%3E%3C/svg%3E")}
+${T} .head .t{order:1;flex:0 1 auto;min-width:0;max-width:62%;margin:0 auto;padding:7px 26px;border-radius:26px;background:rgba(40,40,42,.92);border:1px solid rgba(255,255,255,.1);text-align:center;cursor:pointer}
+${T} .head .t #hn{font:600 17px/1.2 -apple-system,'Inter',sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+${T} .head .t small{display:block;color:#8e8e93;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+${T} .head .t small.on,${T} .head .t small.ty{color:#3e88f7}
+${T} .head #hav{order:2;width:44px;height:44px;border-radius:50%;border:1px solid rgba(255,255,255,.1);overflow:hidden;flex:none}
+${T} .head #hav .av{width:44px;height:44px;font-size:18px}
+${T} .head #hcall,${T} .head #hmenu{display:none!important}
+${T} .main{--wp:${TGDOODLE},linear-gradient(180deg,#0b0b14,#000)}
+${T} .them .b{background:#262629;color:#fff;border-radius:19px;border-bottom-left-radius:5px}
+${T} .me .b{background:linear-gradient(180deg,#3d78ff,#3b6ee8);color:#fff;border-radius:19px;border-bottom-right-radius:5px;box-shadow:none}
+${T} .sys{background:rgba(40,40,42,.9);color:#fff;font-weight:600;font-size:12.5px}
+${T} .comp{background:transparent;border:0;align-items:flex-end;gap:8px;padding:6px 10px calc(8px + env(safe-area-inset-bottom))}
+${T} .comp>#att{width:48px;height:48px;border-radius:50%;background:rgba(40,40,42,.92);border:1px solid rgba(255,255,255,.1);color:#fff;display:grid;place-items:center;flex:none}
+${T} .comp>#att svg{width:24px;height:24px;transform:rotate(0)}
+${T} .pill{background:rgba(28,28,30,.94);border:1px solid rgba(255,255,255,.1);border-radius:25px;min-height:48px;padding:0 6px 0 4px}
+${T} .pill textarea{color:#fff;padding:13px 8px}
+${T} .pill #camb,${T} #stkBtn{display:none!important}
+${T} .pill #emoBtn{order:5;width:40px;height:48px;color:#8e8e93}
+${T} .comp #mic{width:48px;height:48px;background:rgba(40,40,42,.92);border:1px solid rgba(255,255,255,.1);box-shadow:none;color:#fff}
+${T} .comp #send{width:48px;height:48px;background:#3e88f7;box-shadow:none;color:#fff}
+${T} .comp .send svg{margin-left:0}
+${T} .rpb{background:rgba(28,28,30,.96)}
+${T} .attm{position:fixed;left:10px;right:10px;bottom:calc(10px + env(safe-area-inset-bottom));z-index:60;display:flex;justify-content:space-around;gap:6px;padding:18px 10px 16px;border-radius:30px;background:#1c1c1e;border:1px solid rgba(255,255,255,.08);box-shadow:0 20px 60px rgba(0,0,0,.7)}
+${T} .attm[hidden]{display:none}
+${T} .attm button{display:grid;justify-items:center;gap:6px;color:#3e88f7;font-size:24px;min-width:70px}
+${T} .attm button span{font-size:13px;font-weight:600;color:#fff}
+${T} .head .t:active{opacity:.8}
+${T} .add,${T} .btn.p{background:#3e88f7;box-shadow:none;color:#fff}
+${T} .setov{background:#000}
 
 /* ── WhatsApp style (dark) ── */
 ${W}{--rose:#00a884;--peach:#25d366;--lilac:#53bdeb;--txt:#e9edef;--mut:#8696a0;--line:rgba(134,150,160,.18);--panel:#233138}
@@ -1437,6 +1535,359 @@ ${G} .lg{background:linear-gradient(120deg,#4f7cff,#a98bff 60%,#ff7ab6);-webkit-
   addEventListener('online', fetchCfg);
   window.THEME = { open, build, setCfg, mode: eff };
   apply(); applyLogo(); skeleton(); fetchCfg();
+})();
+
+</script>
+<script>
+// LYNKO CHAT v2 — Telegram-style layout glue, Contacts tab, Devices, Recovery key, Help desk, Ringtones, Group chats, video compression.
+(function () {
+  'use strict';
+  const $ = id => document.getElementById(id);
+  const E = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const SV = p => '<svg viewBox="0 0 24 24" aria-hidden="true">' + p + '</svg>';
+  const IC = {
+    contacts: SV('<circle cx="12" cy="12" r="9.5"/><circle cx="12" cy="10" r="3.2"/><path d="M6.2 18.6c1.4-2.4 3.3-3.6 5.8-3.6s4.4 1.2 5.8 3.6"/>'),
+    calls: SV('<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/>'),
+    chats: SV('<path d="M21 11.5a8.5 8.5 0 0 1-12.6 7.4L3 20.5l1.7-5A8.5 8.5 0 1 1 21 11.5z"/>'),
+    settings: SV('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>'),
+    story: SV('<circle cx="12" cy="12" r="9.5"/><path d="M12 8v8M8 12h8"/>'),
+    attach: SV('<path d="M21.4 11l-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/>'),
+    arrowUp: SV('<path d="M12 19V5M5 12l7-7 7 7"/>'),
+    plane: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3.4 20.4l17.45-7.48a1 1 0 0 0 0-1.84L3.4 3.6a.99.99 0 0 0-1.35 1.17L4.12 11 12 12l-7.88 1-2.07 6.23a.99.99 0 0 0 1.35 1.17z"/></svg>',
+    clip: SV('<path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>'),
+  };
+  const st = document.createElement('style');
+  st.textContent = `
+#v2story{width:40px;height:40px;border-radius:50%;display:grid;place-items:center;color:var(--rose);position:relative;flex:none}
+#v2story svg,.nav button svg{width:26px;height:26px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.nav button svg{width:24px;height:24px}
+.comp>#att{width:46px;height:46px;display:grid;place-items:center;flex:none;color:var(--mut)}.comp>#att svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.v2cap{padding:16px 18px 6px;color:var(--mut);font:600 13px/1 system-ui,sans-serif;letter-spacing:.5px;text-transform:uppercase}
+.v2ac .av{display:grid;place-items:center;color:#fff;font-size:24px}
+.v2p .bd{padding:6px 16px 40px;max-width:600px;margin:0 auto}
+.v2g{background:var(--panel);border-radius:16px;overflow:hidden;margin:10px 0}
+.v2r{display:flex;align-items:center;gap:12px;padding:13px 14px;border-bottom:1px solid var(--line);min-height:56px}.v2r:last-child{border:0}
+.v2r .v2t{flex:1;min-width:0}.v2r b{display:block;font-size:16px}.v2r small{color:var(--mut);display:block;margin-top:2px;font-size:13px}.v2r em{font-style:normal;font-size:11px;font-weight:700;background:rgba(52,199,89,.2);color:#34c759;border-radius:8px;padding:2px 7px;margin-left:6px}
+.v2r button.v2x{color:#ff453a;font-weight:600;padding:8px 10px}
+.v2n{color:var(--mut);font-size:14px;line-height:1.5;margin:10px 4px}
+.v2key{font:700 20px/1.5 ui-monospace,Menlo,monospace;text-align:center;letter-spacing:1px;word-break:break-all;background:rgba(255,255,255,.06);border-radius:14px;padding:16px 10px;margin:14px 0;user-select:all}
+.v2row2{display:flex;gap:8px;margin:8px 0}.v2row2>*{flex:1}
+.v2th{display:grid;gap:8px;margin:12px 0}.v2m{max-width:82%;padding:9px 13px;border-radius:16px;font-size:15px;line-height:1.4;white-space:pre-wrap;word-break:break-word}.v2m small{display:block;opacity:.6;font-size:11px;margin-top:3px}
+.v2m.u{justify-self:end;background:var(--rose);color:#fff}.v2m.a{justify-self:start;background:var(--panel)}.v2m.s{justify-self:center;background:rgba(255,255,255,.07);font-size:13px;color:var(--mut)}
+.v2in{width:100%;min-height:90px;border-radius:14px;padding:12px;background:rgba(255,255,255,.07);color:inherit;border:1px solid var(--line);resize:vertical;font:16px/1.4 system-ui,sans-serif}
+.v2sel{max-height:46vh;max-height:46dvh;overflow:auto;margin:10px 0;border-radius:14px;background:rgba(255,255,255,.05)}
+.v2sel label{display:flex;gap:12px;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line)}.v2sel input{width:22px;height:22px}
+.v2tone{display:flex;align-items:center;gap:12px;width:100%;padding:14px;text-align:left;border-bottom:1px solid var(--line)}.v2tone:last-child{border:0}.v2tone i{width:22px;height:22px;border-radius:50%;border:2px solid var(--mut);flex:none}.v2tone.on i{border-color:var(--rose);background:radial-gradient(var(--rose) 45%,transparent 50%)}
+.gsn{font-size:12.5px;font-weight:700;margin:0 0 3px;opacity:.95}
+.v2bio{margin-top:10px;color:var(--rose);font-size:16px;font-weight:600;padding:10px}`;
+  document.head.appendChild(st);
+
+  const theme = () => document.documentElement.dataset.theme || 'tg';
+  const rel = t => { const s = Math.max(0, (Date.now() - new Date(t)) / 1000); return s < 90 ? 'just now' : s < 3600 ? Math.round(s / 60) + ' min ago' : s < 86400 ? Math.round(s / 3600) + ' h ago' : Math.round(s / 86400) + ' d ago' };
+  function page(title, html) {
+    const o = document.createElement('div'); o.className = 'lx v2p';
+    o.innerHTML = '<div class="bar"><button data-x>‹ Back</button><b></b><span class="sp"></span></div><div class="bd"></div>';
+    o.querySelector('b').textContent = title; o.querySelector('.bd').innerHTML = html || '';
+    document.body.appendChild(o); o.querySelector('[data-x]').onclick = () => { o.remove(); o.onclose && o.onclose() }; return o;
+  }
+
+  // ───────── layout: 4 tabs (Contacts · Calls · Chats · Settings), top bar, composer ─────────
+  let t0 = performance.now();
+  function title() {
+    const lg = document.querySelector('.side .bar .lg'); if (!lg) return;
+    if (theme() != 'tg') { if (lg.dataset.v2) { lg.innerHTML = 'Lynko<i>♥</i>'; delete lg.dataset.v2; delete lg.dataset.h } return }
+    const off = navigator.onLine === false || (window.OFF && !OFF.online), conn = !off && performance.now() - t0 < 12000 && window.__rtOK && !window.__rtOK() && window.__rtWant;
+    const names = { chats: 'Chats', contacts: 'Contacts', calls: 'Calls', status: 'Status' };
+    const txt = off ? 'Waiting for network…' : conn ? 'Connecting…' : (names[typeof tab != 'undefined' ? tab : 'chats'] || 'Chats');
+    const html = (off || conn ? '<span class="tgspin"></span>' : '') + E(txt);
+    if (lg.dataset.h !== html) { lg.innerHTML = html; lg.dataset.h = html; lg.dataset.v2 = 1 }
+  }
+  function composer() {
+    const comp = $('comp'), pill = comp && comp.querySelector('.pill'), att = $('att'), send = $('send'); if (!comp || !pill || !att) return;
+    if (theme() == 'tg') { if (att.parentNode !== comp) comp.insertBefore(att, pill); att.innerHTML = IC.attach; send.innerHTML = IC.arrowUp }
+    else { if (att.parentNode !== pill) pill.insertBefore(att, $('camb')); att.innerHTML = IC.clip; send.innerHTML = IC.plane }
+  }
+  function layout() {
+    const nav = document.querySelector('.nav'); if (!nav || nav.dataset.v2) return; nav.dataset.v2 = 1;
+    const n1 = $('n1'), n3 = $('n3'), n4 = $('n4'), n5 = $('n5'), n2 = $('n2'), sd = $('sdot');
+    const n6 = document.createElement('button'); n6.id = 'n6'; n6.type = 'button'; n6.innerHTML = '<i>' + IC.contacts + '</i>Contacts';
+    n5.innerHTML = '<i>' + IC.calls + '</i>Calls<em class="dot" id="cdot" hidden></em>'; n1.innerHTML = '<i>' + IC.chats + '</i>Chats'; n3.innerHTML = '<i>' + IC.settings + '</i>Settings';
+    n4.hidden = n2.hidden = true; nav.append(n6, n5, n1, n3, n4, n2);
+    n6.onclick = () => setTab('contacts'); n3.onclick = () => settings();
+    const bar = document.querySelector('.side .bar'), s = document.createElement('button'); s.id = 'v2story'; s.type = 'button'; s.setAttribute('aria-label', 'Status'); s.innerHTML = IC.story;
+    if (sd) { sd.remove(); s.appendChild(sd) } else { const d = document.createElement('em'); d.className = 'dot'; d.id = 'sdot'; d.hidden = true; s.appendChild(d) }
+    s.onclick = () => setTab('status'); bar.insertBefore(s, $('addb'));
+    const oldMeb = $('meb').onclick; $('meb').onclick = e => theme() == 'tg' ? $('menub').click() : oldMeb.call($('meb'), e);
+    $('addb').onclick = () => items([['✏️ New message / add contact', addContact], ['👥 New group', () => GX.create()], ['✨ Add status', addStatus]]);
+    $('hn').parentNode.addEventListener('click', () => { if (theme() == 'tg' && typeof cur != 'undefined' && cur) $('hmenu').click() });
+    new MutationObserver(() => { composer(); title() }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    composer(); title(); setInterval(title, 1000);
+  }
+
+  // ───────── Contacts tab ─────────
+  function contactsTab() {
+    const l = $('list'); l.innerHTML = '';
+    const mkRow = (bg, ic, t, fn) => { const b = document.createElement('button'); b.className = 'item v2ac'; b.innerHTML = '<div class="av"></div><div class="n"><div class="r1"><b></b></div></div>'; const a = b.firstChild; a.style.background = bg; a.innerHTML = ic; b.querySelector('b').textContent = t; b.querySelector('b').style.color = 'var(--rose)'; b.onclick = fn; l.appendChild(b) };
+    mkRow('rgba(62,136,247,.18)', '➕', 'Add contact', () => addContact()); mkRow('rgba(62,136,247,.18)', '👥', 'New group', () => GX.create());
+    const q = (typeof qs != 'undefined' ? qs : '');
+    const arr = [...contacts.values()].filter(c => !c.group && c.username.toLowerCase().includes(q)).sort((a, b) => a.username.localeCompare(b.username));
+    const cap = document.createElement('div'); cap.className = 'v2cap'; cap.textContent = arr.length ? 'Your contacts on Lynko' : 'No contacts yet'; l.appendChild(cap);
+    for (const c of arr) {
+      const b = document.createElement('button'); b.className = 'item';
+      b.innerHTML = `${av(c)}<div class="n"><div class="r1"><b></b></div><div class="r2"><span class="pv"></span></div></div>`;
+      b.querySelector('b').textContent = c.username; let pr = ''; try { pr = F.pres(c.id) } catch {} b.querySelector('.pv').textContent = c.bot ? '@' + c.handle + ' · bot' : (pr || 'last seen recently');
+      if (pr == 'online') b.querySelector('.pv').style.color = 'var(--rose)';
+      b.onclick = () => { setTab('chats'); openChat(c.id) }; l.appendChild(b);
+    }
+  }
+
+  // ───────── key helpers (same as the login page) ─────────
+  const enc2 = new TextEncoder(), hex = b => [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join('');
+  async function kdf(pw, salt) { const m = await crypto.subtle.importKey('raw', enc2.encode(pw), 'PBKDF2', false, ['deriveBits']); return crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: enc2.encode(salt), iterations: 150000 }, m, 256) }
+  const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  const rkGen = () => { const b = crypto.getRandomValues(new Uint8Array(20)); let bits = '', s = ''; for (const x of b) bits += x.toString(2).padStart(8, '0'); for (let i = 0; i < 160; i += 5) s += B32[parseInt(bits.slice(i, i + 5), 2)]; return s.match(/.{4}/g).join('-') };
+  const rkNorm = s => String(s).toUpperCase().replace(/[^A-Z2-7]/g, '');
+  async function rkDerive(rk, ident) { const k = rkNorm(rk); return { wrap: await crypto.subtle.importKey('raw', await kdf(k, 'recwrap:' + ident), 'AES-GCM', false, ['encrypt', 'decrypt']), auth: hex(await kdf(k, 'recauth:' + ident)) } }
+
+  async function recovery() {
+    const o = page('Recovery key'), bd = o.querySelector('.bd');
+    let set = !!me.rec; try { set = (await api('/api/recovery')).set; me.rec = set } catch {}
+    const draw = () => {
+      bd.innerHTML = `<div class="v2g"><div class="v2r"><div class="v2t"><b>${set ? 'Recovery key is set ✓' : 'Recovery key is not set'}</b><small>${set ? 'Keep it safe. It lets YOU reset your password without asking anyone.' : 'Without it, a forgotten password means asking the admin (and losing your old chats).'}</small></div></div></div>
+      <p class="v2n">A recovery key is a code like <b>ABCD-EFGH-…</b>. Write it down or save it somewhere safe (not in this chat app). Anyone who has it AND your phone number can reset your password.</p>
+      <button class="btn p" id="rkmk" style="width:100%">${set ? 'Make a new recovery key' : 'Create my recovery key'}</button>`;
+      $('rkmk').onclick = make;
+    };
+    async function make() {
+      const priv = sessionStorage.getItem('lynko_priv'); if (!priv) return toast('Unlock the app first');
+      $('rkmk').disabled = true; $('rkmk').textContent = 'Creating…';
+      try {
+        const ident = localStorage.getItem('lynko_ident'), rk = rkGen(), { wrap, auth } = await rkDerive(rk, ident), iv = crypto.getRandomValues(new Uint8Array(12));
+        const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, wrap, enc2.encode(priv));
+        await api('/api/recovery', 'POST', { recAuth: auth, recPriv: JSON.stringify({ iv: b64(iv), ct: b64(ct) }) }); me.rec = true; set = true;
+        bd.innerHTML = `<h3 style="text-align:center;margin-top:14px">Your recovery key</h3><div class="v2key">${rk}</div><p class="v2n"><b>Save it now.</b> It is shown only once. The server cannot show it again.</p>
+        <div class="v2row2"><button class="btn" id="rkc">Copy</button><button class="btn" id="rkd">Download</button></div><label class="v2r" style="border-radius:14px;background:var(--panel)"><input type="checkbox" id="rkok" style="width:22px;height:22px"><span>I saved it somewhere safe</span></label><button class="btn p" id="rkdone" style="width:100%;margin-top:12px" disabled>Done</button>`;
+        $('rkc').onclick = () => { try { navigator.clipboard.writeText(rk); toast('Copied') } catch { toast('Copy it by hand') } };
+        $('rkd').onclick = () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['Lynko recovery key\nPhone: ' + ident + '\nKey: ' + rk + '\n'], { type: 'text/plain' })); a.download = 'lynko-recovery-key.txt'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000) };
+        $('rkok').onchange = () => { $('rkdone').disabled = !$('rkok').checked }; $('rkdone').onclick = () => { o.remove(); try { settings(setPg) } catch {} };
+      } catch (e) { toast(e.message || 'Could not create'); draw() }
+    }
+    draw();
+  }
+
+  // ───────── Devices ─────────
+  async function devices() {
+    const o = page('Devices'), bd = o.querySelector('.bd');
+    const load = async () => {
+      let d = []; try { d = await api('/api/sessions') } catch (e) { bd.innerHTML = '<p class="v2n">' + E(e.message) + '</p>'; return }
+      bd.innerHTML = '<p class="v2n">Phones and browsers logged in to your account. Log out any you don’t recognise.</p><div class="v2g">' + d.map(x => `<div class="v2r"><div class="v2t"><b>${E(x.device)}${x.current ? '<em>This device</em>' : ''}</b><small>${E(x.ip)} · active ${rel(x.lastSeen)}</small></div>${x.current ? '' : `<button class="v2x" data-s="${E(x.sid)}">Log out</button>`}</div>`).join('') + '</div>' + (d.length > 1 ? '<button class="btn d" id="dvall" style="width:100%">Log out all other devices</button>' : '');
+      bd.querySelectorAll('[data-s]').forEach(b => b.onclick = async () => { try { await api('/api/sessions/' + encodeURIComponent(b.dataset.s), 'DELETE'); toast('Device logged out'); load() } catch (e) { toast(e.message) } });
+      const all = $('dvall'); if (all) all.onclick = async () => { if (!confirm('Log out every other device?')) return; try { await api('/api/sessions/others', 'POST', {}); toast('Other devices logged out'); load() } catch (e) { toast(e.message) } };
+    };
+    load();
+  }
+
+  // ───────── Help desk (talk to the admins) ─────────
+  async function thread(tid, title) {
+    const o = page(title || 'Request'), bd = o.querySelector('.bd'); let timer = 0, last = '';
+    const draw = d => {
+      const sig = JSON.stringify(d.msgs.length + d.status); if (sig === last) return; last = sig;
+      bd.innerHTML = '<div class="v2th">' + d.msgs.map(m => `<div class="v2m ${m.from == 'user' ? 'u' : m.from == 'admin' ? 'a' : 's'}">${E(m.t)}<small>${m.from == 'admin' ? 'Admin · ' : ''}${rel(m.ts)}</small></div>`).join('') + '</div>' +
+        (d.status == 'open' ? '<textarea class="v2in" id="thx" maxlength="1000" placeholder="Write a reply…"></textarea><button class="btn p" id="thgo" style="width:100%;margin-top:8px">Send</button>' : '<p class="v2n">This request is closed.</p>');
+      const go = $('thgo'); if (go) go.onclick = async () => { const t = $('thx').value.trim(); if (!t) return; go.disabled = true; try { draw0(await api('/api/help/reply', 'POST', { tid, text: t })) } catch (e) { toast(e.message); go.disabled = false } };
+      window.scrollTo(0, 0);
+    };
+    const draw0 = d => { last = ''; draw(d) };
+    const poll = async () => { try { draw(await api('/api/help/get', 'POST', { tid })) } catch {} timer = setTimeout(poll, 6000) };
+    o.onclose = () => clearTimeout(timer); poll();
+  }
+  async function support() {
+    const o = page('Contact admin'), bd = o.querySelector('.bd');
+    const load = async () => {
+      let rows = []; try { rows = await api('/api/help/mine') } catch {}
+      bd.innerHTML = '<p class="v2n">Have a problem? A bug, a question, a report about someone? Write to the admins — they answer here.</p><button class="btn p" id="spnew" style="width:100%">New request</button>' +
+        (rows.length ? '<div class="v2cap">My requests</div><div class="v2g">' + rows.map(r => `<button class="v2r" data-t="${E(r.tid)}" style="width:100%;text-align:left"><div class="v2t"><b>${E(r.last)}</b><small>${r.status == 'open' ? 'Open' : 'Closed'} · ${rel(r.updatedAt)}</small></div><span style="color:var(--mut)">›</span></button>`).join('') + '</div>' : '');
+      bd.querySelectorAll('[data-t]').forEach(b => b.onclick = () => thread(b.dataset.t));
+      $('spnew').onclick = () => {
+        bd.innerHTML = '<textarea class="v2in" id="spx" maxlength="1000" placeholder="Describe the problem…" style="min-height:140px"></textarea><button class="btn p" id="spgo" style="width:100%;margin-top:10px">Send to admins</button>';
+        $('spgo').onclick = async () => { const t = $('spx').value.trim(); if (t.length < 3) return toast('Write a few words'); $('spgo').disabled = true; try { const r = await api('/api/help/new', 'POST', { kind: 'problem', text: t }); toast('Sent ✓'); await load(); thread(r.tid) } catch (e) { toast(e.message); $('spgo').disabled = false } };
+      };
+    };
+    load();
+  }
+
+  // ───────── Ringtones & sounds ─────────
+  const RING = window.RING = (() => {
+    const K = 'lk_ring', CK = 'lk_ring_custom';
+    const get = () => { try { return Object.assign({ tone: 'classic', msg: 'pop', vol: .8, vib: 1 }, JSON.parse(localStorage.getItem(K) || '{}')) } catch { return { tone: 'classic', msg: 'pop', vol: .8, vib: 1 } } };
+    const put = v => { try { localStorage.setItem(K, JSON.stringify({ ...get(), ...v })) } catch {} };
+    let ac = null, timer = null, aud = null;
+    const ctx = () => { ac = ac || new (window.AudioContext || window.webkitAudioContext)(); try { ac.resume() } catch {} return ac };
+    const note = (f, t, d, type = 'sine', v = .25) => { const a = ctx(), o = a.createOscillator(), g = a.createGain(), n = a.currentTime + t; o.type = type; o.frequency.value = f; g.gain.setValueAtTime(0, n); g.gain.linearRampToValueAtTime(v * get().vol, n + .02); g.gain.exponentialRampToValueAtTime(.0001, n + d); o.connect(g); g.connect(a.destination); o.start(n); o.stop(n + d + .05) };
+    const TONES = {
+      classic: ['Classic', 2.2, () => { note(660, 0, .3); note(880, .38, .3) }],
+      marimba: ['Marimba', 2.4, () => { [523, 659, 784, 1047].forEach((f, i) => note(f, i * .16, .35, 'triangle')) }],
+      pulse: ['Pulse', 1.6, () => { note(900, 0, .12, 'square', .12); note(900, .2, .12, 'square', .12); note(900, .4, .12, 'square', .12) }],
+      chime: ['Chime', 2.6, () => { note(1318, 0, .9, 'sine', .22); note(1760, .22, .9, 'sine', .18) }],
+      soft: ['Soft', 2.4, () => { note(440, 0, .8, 'sine', .22); note(554, .35, .8, 'sine', .18) }],
+      digital: ['Digital', 1.8, () => { [600, 750, 900, 1100].forEach((f, i) => note(f, i * .12, .1, 'sawtooth', .1)) }],
+      melody: ['Melody', 3.2, () => { [659, 659, 784, 659, 523, 587, 659].forEach((f, i) => note(f, i * .22, .2, 'triangle', .22)) }],
+    };
+    const MSG = { pop: ['Pop', () => note(880, 0, .12)], ding: ['Ding', () => { note(1175, 0, .3); note(1568, .1, .3) }], tap: ['Tap', () => note(500, 0, .05, 'square', .1)], none: ['Off', () => {}] };
+    const custom = () => { try { return JSON.parse(localStorage.getItem(CK) || 'null') } catch { return null } };
+    function stop() { clearInterval(timer); timer = null; if (aud) { try { aud.pause() } catch {} aud = null } try { navigator.vibrate && navigator.vibrate(0) } catch {} }
+    function start(kind) {
+      stop(); const s = get();
+      if (kind == 'out') { const go = () => note(440, 0, .8, 'sine', .15); go(); timer = setInterval(go, 3000); return true }
+      if (s.tone == 'custom' && custom()) { try { aud = new Audio(custom().d); aud.loop = true; aud.volume = s.vol; aud.play().catch(() => {}) } catch {} }
+      else { const t = TONES[s.tone] || TONES.classic, go = () => t[2](); go(); timer = setInterval(go, t[1] * 1000) }
+      if (s.vib) try { navigator.vibrate && navigator.vibrate([400, 200, 400]); timer = timer || setInterval(() => navigator.vibrate && navigator.vibrate([400, 200, 400]), 2400) } catch {}
+      return true;
+    }
+    const preview = n => { stop(); if (n == 'custom' && custom()) { aud = new Audio(custom().d); aud.volume = get().vol; aud.play().catch(() => {}); setTimeout(stop, 4000) } else { (TONES[n] || TONES.classic)[2](); } };
+    const msg = () => { const m = MSG[get().msg] || MSG.pop; m[1]() };
+    return { get, put, start, stop, msg, preview, TONES, MSG, custom, setCustom: v => localStorage.setItem(CK, JSON.stringify(v)) };
+  })();
+  function ringtone() {
+    const o = page('Ringtone & sounds'), bd = o.querySelector('.bd');
+    const draw = () => {
+      const s = RING.get(), c = RING.custom();
+      bd.innerHTML = '<div class="v2cap">Call ringtone</div><div class="v2g">' + Object.entries(RING.TONES).map(([k, v]) => `<button class="v2tone ${s.tone == k ? 'on' : ''}" data-t="${k}"><i></i><span>${E(v[0])}</span></button>`).join('') + (c ? `<button class="v2tone ${s.tone == 'custom' ? 'on' : ''}" data-t="custom"><i></i><span>${E(c.n)}</span></button>` : '') + '</div>' +
+        '<button class="btn" id="rtf" style="width:100%">🎵 Use my own sound (from files)</button><input type="file" id="rtfi" accept="audio/*" hidden>' +
+        `<div class="v2cap">Volume</div><input type="range" id="rtv" min="0.1" max="1" step="0.05" value="${s.vol}" style="width:100%">` +
+        `<div class="v2g" style="margin-top:14px"><label class="v2r"><div class="v2t"><b>Vibrate on incoming calls</b></div><input type="checkbox" id="rtvib" ${s.vib ? 'checked' : ''} style="width:22px;height:22px"></label></div>` +
+        '<div class="v2cap">New message sound</div><div class="v2g">' + Object.entries(RING.MSG).map(([k, v]) => `<button class="v2tone ${s.msg == k ? 'on' : ''}" data-m="${k}"><i></i><span>${E(v[0])}</span></button>`).join('') + '</div><p class="v2n">Message sounds play while the app is open. When the app is closed, your phone’s own notification sound is used.</p>';
+      bd.querySelectorAll('[data-t]').forEach(b => b.onclick = () => { RING.put({ tone: b.dataset.t }); RING.preview(b.dataset.t); draw() });
+      bd.querySelectorAll('[data-m]').forEach(b => b.onclick = () => { RING.put({ msg: b.dataset.m }); RING.msg(); draw() });
+      $('rtv').onchange = e => { RING.put({ vol: +e.target.value }); RING.preview(RING.get().tone) };
+      $('rtvib').onchange = e => RING.put({ vib: e.target.checked ? 1 : 0 });
+      $('rtf').onclick = () => $('rtfi').click();
+      $('rtfi').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (!f) return; if (f.size > 700 * 1024) return toast('Pick a shorter sound (under 700 KB)'); const r = new FileReader(); r.onload = () => { RING.setCustom({ n: f.name.replace(/\.[^.]+$/, '').slice(0, 30), d: r.result }); RING.put({ tone: 'custom' }); RING.preview('custom'); draw() }; r.readAsDataURL(f) };
+    };
+    o.onclose = () => RING.stop(); draw();
+  }
+
+  // ───────── fingerprint / face unlock switch ─────────
+  async function bioToggle(t) {
+    try { if (t.checked) { await BIO.enable(); toast('Fingerprint unlock is on') } else { BIO.off(); toast('Fingerprint unlock is off') } }
+    catch (e) { t.checked = BIO.on(); toast(e && e.name == 'NotAllowedError' ? 'Cancelled' : 'Could not turn it on on this device') }
+  }
+
+  // ───────── Group chats ─────────
+  const GX = window.GX = {
+    groups: new Map(), users: new Map(), raw: new Map(),
+    is: id => typeof id == 'string' && id[0] == 'g' && id[1] == ':',
+    who(uid) { if (uid == me.id) return 'You'; const c = contacts.get(uid); if (c) return c.username; return (GX.users.get(uid) || {}).username || 'Member' },
+    col(uid) { const cs = ['#ff7a85', '#ffb35c', '#7bd88f', '#5ac8fa', '#c9a6ff', '#ff7ab6']; let h = 0; for (const ch of String(uid)) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return cs[h % cs.length] },
+    fixM(d) { if (d && d.gid) { d.to = 'g:' + d.gid; d.r = false; d.d = false; d.rx = d.rx || {} } return d },
+    // the chat code talks to "peers"; for a group the peer is "g:<id>". These calls are redirected to the group API.
+    map(url, method, body) {
+      let m;
+      if (method == 'GET' && (m = url.match(/^\/api\/messages\?with=(g:[a-f0-9]{24})(?:&after=(.*))?$/))) return { url: '/api/gmessages?gid=' + m[1].slice(2) + (m[2] ? '&after=' + m[2] : ''), method: 'GET', post: d => Array.isArray(d) ? d.map(GX.fixM) : d };
+      if (method == 'POST' && url == '/api/messages' && body && GX.is(body.to)) { const b = { ...body, gid: body.to.slice(2) }; delete b.to; return { url: '/api/gmessages', method: 'POST', body: b, post: GX.fixM } }
+      if (method == 'POST' && url == '/api/read' && body && GX.is(body.with)) return { url: '/api/groups/' + body.with.slice(2) + '/read', method: 'POST', body: {} };
+      if (method == 'DELETE' && (m = url.match(/^\/api\/messages\/([a-f0-9]{24})$/)) && GX.is(cur)) return { url: '/api/gmessages/' + m[1], method: 'DELETE' };
+      return null;
+    },
+    inject() { for (const [id, g] of GX.groups) contacts.set('g:' + id, { id: 'g:' + id, username: g.name, group: true, pub: '', about: g.members.length + ' members', dpv: 0 }) },
+    async load() {
+      let gs; try { gs = await api('/api/groups') } catch { return }
+      if (!Array.isArray(gs)) return; const ids = new Set();
+      for (const g of gs) {
+        ids.add(g.id); g.members.forEach(u => GX.users.set(u.id, u));
+        const old = GX.groups.get(g.id);
+        if (g.key && (!old || old.keyId !== g.key.ct)) { try { const raw = await open(g.key.by, g.key.iv, unb64(g.key.ct)); GX.raw.set(g.id, new Uint8Array(raw)); delete keys['g:' + g.id] } catch {} }
+        GX.groups.set(g.id, { ...g, keyId: g.key && g.key.ct });
+        if (g.last) { g.last.to = 'g:' + g.id; try { await setLast('g:' + g.id, GX.fixM(g.last), g.unread) } catch {} }
+      }
+      for (const id of [...GX.groups.keys()]) if (!ids.has(id)) { GX.groups.delete(id); contacts.delete('g:' + id); chats.delete('g:' + id); GX.raw.delete(id); delete keys['g:' + id]; if (cur == 'g:' + id) closeChat() }
+      GX.inject(); if (cur && GX.is(cur)) setSub(); renderList();
+    },
+    async wrapFor(gid, uids) { const raw = GX.raw.get(gid), out = {}; for (const id of uids) { const w = await seal(id, raw); out[id] = { iv: w.iv, ct: b64(w.ct) } } return out },
+    create() {
+      const list = [...contacts.values()].filter(c => !c.group && !c.bot); if (!list.length) return toast('Add a contact first');
+      const o = sheet('<h3 style="margin-bottom:8px">New group</h3><input id="gxn" maxlength="40" placeholder="Group name" style="width:100%;margin-bottom:6px"><div class="v2sel">' + list.map(c => `<label><input type="checkbox" value="${E(c.id)}"> ${E(c.username)}</label>`).join('') + '</div><button class="btn p" id="gxgo" style="width:100%">Create group</button>');
+      o.querySelector('#gxgo').onclick = async () => {
+        const name = o.querySelector('#gxn').value.trim(), ids = [...o.querySelectorAll('.v2sel input:checked')].map(x => x.value);
+        if (!name) return toast('Give the group a name'); if (!ids.length) return toast('Pick at least one person');
+        o.querySelector('#gxgo').disabled = true;
+        try {
+          const raw = crypto.getRandomValues(new Uint8Array(32)), keysMap = {};
+          for (const id of [me.id, ...ids]) { const w = await seal(id, raw); keysMap[id] = { iv: w.iv, ct: b64(w.ct) } }
+          const g = await api('/api/groups', 'POST', { name, members: ids, keys: keysMap }); o.remove(); await GX.load(); setTab('chats'); openChat('g:' + g.id);
+        } catch (e) { toast(e.message || 'Could not create the group'); o.querySelector('#gxgo').disabled = false }
+      };
+    },
+    menu() {
+      const gid = cur.slice(2), g = GX.groups.get(gid); if (!g) return;
+      items([['👥 Group info', () => GX.info(gid)], ['🔍 Search in chat', searchChat], [pinned(cur) ? '📌 Unpin chat' : '📌 Pin chat', () => togglePin(cur)], ['🖼 Wallpaper', wallpaper], ['🚪 Leave group', () => GX.leave(gid)]]);
+    },
+    async leave(gid) { if (!await ask('Leave this group?', { ok: 'Leave' })) return; try { await api('/api/groups/' + gid + '/leave', 'POST', {}); closeChat(); await GX.load(); toast('You left the group') } catch (e) { toast(e.message) } },
+    info(gid) {
+      const g = GX.groups.get(gid); if (!g) return; const mineAdmin = g.owner == me.id || g.admins.includes(me.id);
+      const o = page(g.name), bd = o.querySelector('.bd');
+      const draw = () => {
+        const g2 = GX.groups.get(gid); if (!g2) return o.remove();
+        bd.innerHTML = `<p class="v2n" style="text-align:center">${g2.members.length} members · end-to-end encrypted · messages vanish after 24 hours</p>` +
+          (mineAdmin ? '<div class="v2row2"><button class="btn" id="gxadd">➕ Add people</button><button class="btn" id="gxren">✏️ Rename</button></div>' : '') +
+          '<div class="v2g">' + g2.members.map(u => `<div class="v2r"><div class="v2t"><b>${E(GX.who(u.id))}${u.id == g2.owner ? '<em>Owner</em>' : g2.admins.includes(u.id) ? '<em>Admin</em>' : ''}</b><small>ID ${E(u.id)}</small></div>${u.id != me.id && mineAdmin && u.id != g2.owner ? `<button class="v2x" data-r="${u.id}">Remove</button>` : ''}${u.id != me.id && g2.owner == me.id && u.id != g2.owner ? `<button class="v2x" style="color:var(--rose)" data-a="${u.id}">${g2.admins.includes(u.id) ? 'Demote' : 'Make admin'}</button>` : ''}</div>`).join('') + '</div><button class="btn d" id="gxlv" style="width:100%">Leave group</button>';
+        bd.querySelectorAll('[data-r]').forEach(b => b.onclick = async () => { try { await api('/api/groups/' + gid + '/remove', 'POST', { id: b.dataset.r }); await GX.load(); draw() } catch (e) { toast(e.message) } });
+        bd.querySelectorAll('[data-a]').forEach(b => b.onclick = async () => { try { await api('/api/groups/' + gid + '/admin', 'POST', { id: b.dataset.a, on: !g2.admins.includes(b.dataset.a) }); await GX.load(); draw() } catch (e) { toast(e.message) } });
+        const add = $('gxadd'); if (add) add.onclick = () => GX.add(gid, draw);
+        const ren = $('gxren'); if (ren) ren.onclick = async () => { const n = prompt('Group name', g2.name); if (!n || !n.trim()) return; try { await api('/api/groups/' + gid + '/rename', 'POST', { name: n.trim() }); await GX.load(); draw() } catch (e) { toast(e.message) } };
+        $('gxlv').onclick = async () => { await GX.leave(gid); o.remove() };
+      };
+      draw();
+    },
+    add(gid, done) {
+      const g = GX.groups.get(gid), have = new Set(g.members.map(m => m.id)), list = [...contacts.values()].filter(c => !c.group && !c.bot && !have.has(c.id));
+      if (!list.length) return toast('Everyone in your contacts is already here');
+      const o = sheet('<h3 style="margin-bottom:8px">Add people</h3><div class="v2sel">' + list.map(c => `<label><input type="checkbox" value="${E(c.id)}"> ${E(c.username)}</label>`).join('') + '</div><button class="btn p" id="gxgo2" style="width:100%">Add</button>');
+      o.querySelector('#gxgo2').onclick = async () => {
+        const ids = [...o.querySelectorAll('input:checked')].map(x => x.value); if (!ids.length) return;
+        try { await api('/api/groups/' + gid + '/add', 'POST', { members: ids, keys: await GX.wrapFor(gid, ids) }); o.remove(); await GX.load(); done && done(); toast('Added') } catch (e) { toast(e.message) }
+      };
+    },
+  };
+
+  // ───────── video compression (in the phone, before sending) ─────────
+  const canComp = !!(window.MediaRecorder && HTMLCanvasElement.prototype.captureStream);
+  async function compress(f, onp, ab) {
+    const mt = ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'].find(t => { try { return MediaRecorder.isTypeSupported(t) } catch { return false } });
+    if (!mt) return null;
+    const v = document.createElement('video'); v.playsInline = true; v.preload = 'auto'; v.src = URL.createObjectURL(f);
+    try { await new Promise((res, rej) => { v.onloadedmetadata = res; v.onerror = () => rej(0); setTimeout(() => rej(0), 8000) }) } catch { return null }
+    const dur = v.duration; if (!isFinite(dur) || dur > 180 || !v.videoWidth) return null;
+    const sc = Math.min(1, 720 / Math.max(v.videoWidth, v.videoHeight)), w = Math.max(2, Math.round(v.videoWidth * sc / 2) * 2), h = Math.max(2, Math.round(v.videoHeight * sc / 2) * 2);
+    const cv = document.createElement('canvas'); cv.width = w; cv.height = h; const g = cv.getContext('2d');
+    const ac = new (window.AudioContext || window.webkitAudioContext)(); try { await ac.resume() } catch {}
+    let aud = []; try { const src = ac.createMediaElementSource(v), dst = ac.createMediaStreamDestination(); src.connect(dst); aud = dst.stream.getAudioTracks() } catch {}
+    const rec = new MediaRecorder(new MediaStream([...cv.captureStream(24).getVideoTracks(), ...aud]), { mimeType: mt, videoBitsPerSecond: 1100000, audioBitsPerSecond: 64000 }), chunks = [];
+    rec.ondataavailable = e => { if (e.data.size) chunks.push(e.data) };
+    const done = new Promise(r => rec.onstop = r); let alive = true;
+    const draw = () => { if (!alive) return; g.drawImage(v, 0, 0, w, h); onp && onp(Math.min(.99, v.currentTime / dur)); v.requestVideoFrameCallback ? v.requestVideoFrameCallback(draw) : requestAnimationFrame(draw) };
+    const stop = () => { alive = false; setTimeout(() => { if (rec.state != 'inactive') rec.stop() }, 150) };
+    v.onended = stop; rec.start(500);
+    try { await v.play() } catch { alive = false; try { rec.stop() } catch {} try { ac.close() } catch {} return null }
+    draw(); const wd = setInterval(() => { if (ab && ab.x) { v.pause(); stop() } }, 250);
+    await done; clearInterval(wd); try { ac.close() } catch {} URL.revokeObjectURL(v.src);
+    if (ab && ab.x) return null;
+    return { blob: new Blob(chunks, { type: mt.split(';')[0] }), w, h, d: dur };
+  }
+  async function vid(f, onp, ab) {
+    const base = await prepVid(f);
+    if (!canComp || f.size < 3 * 1048576) return base;
+    let c = null; try { c = await compress(f, onp, ab) } catch {}
+    if (c && c.blob.size > 20000 && c.blob.size < f.size * .92) { toast('Video made ' + Math.round(100 - c.blob.size / f.size * 100) + '% smaller'); return { ...base, blob: c.blob, w: c.w, h: c.h, d: c.d || base.d } }
+    if (f.size > MAXV * 1048576) { toast('Video is too big to send (max ' + MAXV + ' MB)'); return null }
+    return base;
+  }
+
+  window.V2 = { layout, contacts: contactsTab, title, composer, recovery, devices, support, ringtone, bioToggle, vid, canComp, thread, rkGen, rkNorm, rkDerive, IC, page };
+  if (window.BIO) BIO.supported().then(v => { V2.bioOK = v }).catch(() => {});
+  const boot = () => { try { layout() } catch (e) { console.error('v2 layout', e) } };
+  boot();
+  const wait = setInterval(() => { if (typeof me !== 'undefined' && me && typeof contacts !== 'undefined') { clearInterval(wait); GX.load() } }, 400);
 })();
 
 </script>
