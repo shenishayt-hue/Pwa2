@@ -6,6 +6,7 @@
 // The admin can NEVER read chats: messages are end-to-end encrypted, this file never touches them.
 const crypto = require('crypto');
 const path = require('path');
+const fs = require('fs');
 const jwt = require('jsonwebtoken');
 const { ObjectId } = require('mongodb');
 const appcfg = require('./appcfg');
@@ -93,8 +94,9 @@ module.exports = function monitor({ secret, pusher, store, C }) {
   };
   const oid = id => { try { return new ObjectId(String(id)); } catch { return null; } };
 
+  let adminHtml = null;
   function mount(app) {
-    app.get('/admin', (q, r) => { if (!ON) return r.status(404).end(); hdr(r); r.sendFile(path.join(__dirname, 'admin.html')); });
+    app.get('/admin', (q, r) => { if (!ON) return r.status(404).end(); hdr(r); if (!adminHtml) adminHtml = fs.readFileSync(path.join(__dirname, 'admin.html'), 'utf8'); r.type('html').send(require('./nonce')(adminHtml, r)); });
     app.get('/admin/api/session', (q, r) => { if (!ON) return r.status(404).end(); hdr(r); r.json({ ok: authed(q) }); });
     app.post('/admin/api/login', (req, res) => {
       if (!ON) return res.status(404).end();
@@ -178,6 +180,7 @@ module.exports = function monitor({ secret, pusher, store, C }) {
       res.json({ ok: 1 });
     });
 
+    require('./help').adminRoutes(app, guard, C);   // Help requests (+ allow password reset)
     // ── appearance: default theme (Lynko love / WhatsApp / white liquid), "force for everyone" and the app logo ──
     const raw = (req, max) => new Promise((ok, no) => { const a = []; let n = 0; req.on('data', c => { n += c.length; if (n > max) { no(new Error('Image is too large (max 2 MB)')); req.destroy(); } else a.push(c); }); req.on('end', () => ok(Buffer.concat(a))); req.on('error', no); });
     const push = d => pusher.trigger('official', 'cfg', d).catch(() => {});   // every open app switches live
