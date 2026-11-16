@@ -15,10 +15,11 @@ function beep(f, d, v = .08) {
 let ringT = null;
 function ringStart(kind) {
   ringStop();
+  if (window.RING && RING.start(kind)) return;   // Settings → Ringtone & sounds
   const go = () => { if (kind == 'in') { beep(660, .3); setTimeout(() => beep(880, .3), 380); navigator.vibrate?.([300, 150, 300]) } else beep(440, .8, .05) };
   go(); ringT = setInterval(go, kind == 'in' ? 2200 : 3000);
 }
-function ringStop() { clearInterval(ringT); ringT = null; navigator.vibrate?.(0) }
+function ringStop() { clearInterval(ringT); ringT = null; navigator.vibrate?.(0); try { window.RING && RING.stop() } catch {} }
 
 // ───────────────────────── presence / last seen ─────────────────────────
 const presence = new Map();   // id -> {online, ts, hidden, at}
@@ -114,7 +115,7 @@ async function notify(peer, d) {
   let text = 'New message';
   if (!lk) try { const p = await payload(d); text = pvText(p) } catch {}
   if (document.hidden || (NATIVE && LynkoApp.bg())) { showOS(lk ? 'LYNKO CHAT' : nm(peer), lk ? 'You have a new message' : 'New message', lk ? 'lk' : 'm' + peer, '/chat?c=' + peer); return }
-  if (peer != cur) { beep(880, .12); banner(lk ? 'LYNKO CHAT' : nm(peer), lk ? 'You have a new message' : text, () => openChat(peer)) }
+  if (peer != cur) { (window.RING ? RING.msg() : beep(880, .12)); banner(lk ? 'LYNKO CHAT' : nm(peer), lk ? 'You have a new message' : text, () => openChat(peer)) }
 }
 
 // ───────────────────────── voice calls ─────────────────────────
