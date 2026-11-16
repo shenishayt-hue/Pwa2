@@ -34,6 +34,16 @@ input::placeholder{color:#b98aa0}
 #err{min-height:20px;color:#ffb3c6;font-size:14px;margin-top:12px;text-align:center}
 .note{margin-top:14px;text-align:center;color:var(--mut);font-size:12.5px;line-height:1.5}
 @media (prefers-reduced-motion:reduce){.heart,.logo i{animation:none}}
+
+.fpov{position:fixed;top:0;right:0;bottom:0;left:0;z-index:50;background:rgba(10,3,8,.94);display:grid;place-items:center;padding:16px;overflow:auto}
+.fpc{width:min(100%,400px);background:#2a0f22;border:1px solid rgba(255,255,255,.12);border-radius:22px;padding:20px;display:grid;gap:10px;margin:auto}
+.fpc h3{margin:0;font-size:20px}.fpc p{margin:0;color:#d6a6ba;font-size:14px;line-height:1.5}.fpc .opt{width:100%;text-align:left;padding:14px;border-radius:14px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.1);color:#fff;font-size:16px}
+.fpc .opt small{display:block;color:#d6a6ba;font-size:13px;margin-top:3px}.fpc .x{justify-self:end;color:#d6a6ba;font-size:15px;padding:4px 8px}
+.fpc textarea{width:100%;min-height:90px;border-radius:14px;padding:12px;background:rgba(255,255,255,.08);color:#fff;border:1px solid rgba(255,255,255,.18);font:16px/1.4 inherit;resize:vertical}
+.fpc .key{font:700 19px/1.5 ui-monospace,Menlo,monospace;text-align:center;letter-spacing:1px;word-break:break-all;background:rgba(255,255,255,.08);border-radius:14px;padding:14px 8px;user-select:all}
+.fpc .m{max-width:86%;padding:8px 12px;border-radius:14px;font-size:15px;line-height:1.4;white-space:pre-wrap;word-break:break-word}.fpc .m.u{justify-self:end;background:#ff5c8a}.fpc .m.a{justify-self:start;background:rgba(255,255,255,.12)}.fpc .m.s{justify-self:center;background:rgba(255,255,255,.07);font-size:13px;color:#d6a6ba}
+.fpc .ok{color:#7be0a0;font-size:14px}.fpc .er{color:#ff8aa5;font-size:14px;min-height:18px}
+.flink{display:block;margin:12px auto 0;color:#ff8fb1;font-size:15px;text-decoration:underline;padding:6px}
 </style>
 <link rel="manifest" href="/manifest.json">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
@@ -56,8 +66,9 @@ input::placeholder{color:#b98aa0}
   <div id="cf" style="display:flex;justify-content:center;margin:2px 0 6px"></div>
   <button class="go" id="go">Log in</button>
   <div id="err"></div>
+  <button class="flink" id="forgot" type="button">Forgot password? / Need help?</button>
   <button id="inst" class="go" type="button" style="background:rgba(255,255,255,.1);box-shadow:none;border:1px solid var(--line);margin-top:10px" hidden>📲 Install LYNKO CHAT app</button>
-  <p class="note">Messages are encrypted on your device. Not even the server can read them. If you forget your password, your chats can't be recovered. The app asks for your password every time you reopen it.<br>By continuing you agree to our <a href="/terms" style="color:#ff8fb1">Terms</a> and <a href="/privacy" style="color:#ff8fb1">Privacy Policy</a>.</p>
+  <p class="note">Messages are encrypted on your device. Not even the server can read them. Keep your recovery key safe: it is the only way to reset a forgotten password yourself. The app asks for your password every time you reopen it.<br>By continuing you agree to our <a href="/terms" style="color:#ff8fb1">Terms</a> and <a href="/privacy" style="color:#ff8fb1">Privacy Policy</a>.</p>
 </main>
 <script>
 // floating hearts
@@ -119,10 +130,118 @@ $('go').onclick=async()=>{
     // the key is kept ENCRYPTED on the phone; the unlocked copy lives only for this app session
     localStorage.removeItem('lynko_priv');localStorage.setItem('lynko_enc',encPriv);localStorage.setItem('lynko_ident',id);
     localStorage.setItem('lynko_id',me.id);localStorage.setItem('lynko_name',me.username||name);sessionStorage.setItem('lynko_priv',priv);
+    if(mode=='reg')await recoveryPanel(id,priv);
     location.href='/chat';
   }catch(e){$('err').textContent=e.name=='OperationError'?'Wrong number or password':e.message;$('go').disabled=false;cfReset()}
 };
 ['u','nm','p'].forEach(i=>$(i).addEventListener('keydown',e=>{if(e.key=='Enter')$('go').click()}));
+
+// ───────── recovery key + forgot password + help desk ─────────
+const B32='ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+const rkGen=()=>{const b=crypto.getRandomValues(new Uint8Array(20));let bits='',s='';for(const x of b)bits+=x.toString(2).padStart(8,'0');for(let i=0;i<160;i+=5)s+=B32[parseInt(bits.slice(i,i+5),2)];return s.match(/.{4}/g).join('-')};
+const rkNorm=s=>String(s).toUpperCase().replace(/[^A-Z2-7]/g,'');
+async function rkDerive(rk,id){const k=rkNorm(rk);return{wrap:await crypto.subtle.importKey('raw',await kdf(k,'recwrap:'+id),'AES-GCM',false,['encrypt','decrypt']),auth:hex(await kdf(k,'recauth:'+id))}}
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function overlay(){const o=document.createElement('div');o.className='fpov';o.innerHTML='<div class="fpc"></div>';document.body.appendChild(o);return o}
+
+// shown once, right after creating an account
+function recoveryPanel(id,priv){return new Promise(async res=>{
+  let rk;try{
+    rk=rkGen();const{wrap,auth}=await rkDerive(rk,id),iv=crypto.getRandomValues(new Uint8Array(12)),ct=await crypto.subtle.encrypt({name:'AES-GCM',iv},wrap,enc.encode(priv));
+    await post('/api/recovery',{recAuth:auth,recPriv:JSON.stringify({iv:b64(iv),ct:b64(ct)})});
+  }catch{return res()}   // can be done later in Settings → Recovery key
+  const o=overlay(),c=o.firstChild;
+  c.innerHTML=`<h3>🔑 Save your recovery key</h3><p>If you ever forget your password, this key lets you reset it yourself. <b>It is shown only once.</b> Write it down or save the file. Don’t keep it inside this app.</p><div class="key">${rk}</div>
+   <div style="display:flex;gap:8px"><button class="go" id="rc" style="margin:0;flex:1">Copy</button><button class="go" id="rd" style="margin:0;flex:1">Download</button></div>
+   <label style="display:flex;gap:10px;align-items:center;font-size:15px"><input type="checkbox" id="rok" style="width:22px;height:22px"> I saved it somewhere safe</label><button class="go" id="rgo" disabled style="margin:0">Continue</button>`;
+  c.querySelector('#rc').onclick=()=>{try{navigator.clipboard.writeText(rk)}catch{}c.querySelector('#rc').textContent='Copied ✓'};
+  c.querySelector('#rd').onclick=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['Lynko recovery key\nPhone: '+id+'\nKey: '+rk+'\n'],{type:'text/plain'}));a.download='lynko-recovery-key.txt';a.click()};
+  c.querySelector('#rok').onchange=e=>{c.querySelector('#rgo').disabled=!e.target.checked};
+  c.querySelector('#rgo').onclick=()=>{o.remove();res()};
+})}
+
+function forgot(first){
+  const o=overlay(),c=o.firstChild;let timer=0,tk2='',cf2=null;
+  const close=()=>{clearTimeout(timer);o.remove()};
+  const mkCf=()=>{if(!TSK||!window.turnstile)return;const d=c.querySelector('.cf2');if(d)cf2=turnstile.render(d,{sitekey:TSK,theme:'dark',callback:t=>{tk2=t},'expired-callback':()=>{tk2=''},'error-callback':()=>{tk2=''}})};
+  const cfNeed=()=>{if(TSK&&!tk2){c.querySelector('.er').textContent='Please complete the security check';return true}return false};
+  const cfDone=()=>{tk2='';try{cf2!==null&&turnstile.reset(cf2)}catch{}};
+  const head=(t,back)=>`<button class="x" id="fx">${back?'‹ Back':'✕ Close'}</button><h3>${t}</h3>`;
+  const wire=back=>{c.querySelector('#fx').onclick=back||close};
+  const myPhone=()=>$('u').value;
+  const menu=()=>{
+    const h=JSON.parse(localStorage.getItem('lk_help')||'null');
+    c.innerHTML=head('Forgot your password?')+`<p>Pick what fits you:</p>
+      <button class="opt" id="o1">🔑 I have my recovery key<small>Fastest. Keeps all your contacts and your account.</small></button>
+      <button class="opt" id="o2">🎟 I have a reset code from the admin<small>Admin approved your request.</small></button>
+      <button class="opt" id="o3">💬 Ask the admin for help<small>No recovery key? Tell the admins. Also for any other problem.</small></button>
+      ${h?'<button class="opt" id="o4">📨 Check my request<small>See the admin’s answer</small></button>':''}`;
+    wire();c.querySelector('#o1').onclick=()=>recov();c.querySelector('#o2').onclick=()=>code();c.querySelector('#o3').onclick=()=>help();const o4=c.querySelector('#o4');if(o4)o4.onclick=()=>thread();
+  };
+  const fields=(extra)=>`<input id="fph" type="tel" placeholder="Phone number" inputmode="tel" value="${esc(myPhone())}">${extra}<input id="fnp" type="password" placeholder="New password (8+ characters)" autocomplete="new-password"><div class="cf2" style="display:flex;justify-content:center"></div><div class="er"></div>`;
+  const finish=(id,pw,msg)=>{c.innerHTML=`<h3>✅ Done</h3><p class="ok">${msg}</p><button class="go" id="fl" style="margin:0">Log in now</button>`;c.querySelector('#fl').onclick=()=>{close();setMode('login');$('u').value=id;$('p').value=pw;$('p').focus()}};
+  const checkPw=()=>{const pw=c.querySelector('#fnp').value;if(pw.length<8){c.querySelector('.er').textContent='New password must be 8+ characters';return null}return pw};
+  const phoneOf=()=>{const id=ident(c.querySelector('#fph').value);if(!/^\d{8,15}$/.test(id)){c.querySelector('.er').textContent='Enter a valid phone number';return null}return id};
+  function recov(){
+    c.innerHTML=head('Reset with recovery key',1)+`<p>Enter the key you saved when you created your account.</p>`+fields('<input id="frk" placeholder="ABCD-EFGH-IJKL-…" autocapitalize="characters" autocomplete="off" spellcheck="false">')+'<button class="go" id="fgo" style="margin:0">Reset password</button>';
+    wire(menu);mkCf();
+    c.querySelector('#fgo').onclick=async()=>{
+      const id=phoneOf(),pw=id&&checkPw(),rk=c.querySelector('#frk').value;if(!id||!pw)return;if(rkNorm(rk).length!==32){c.querySelector('.er').textContent='The recovery key has 32 letters/numbers';return}if(cfNeed())return;
+      const b=c.querySelector('#fgo');b.disabled=true;c.querySelector('.er').textContent='Working…';
+      try{
+        const d=await rkDerive(rk,id),r=await post('/api/recover/start',{phone:id,recAuth:d.auth,cf:tk2});const e=JSON.parse(r.recPriv);
+        let priv;try{priv=new TextDecoder().decode(await crypto.subtle.decrypt({name:'AES-GCM',iv:unb64(e.iv)},d.wrap,unb64(e.ct)))}catch{throw new Error('Wrong number or recovery key')}
+        const wk=await wrapKey(pw,id),iv=crypto.getRandomValues(new Uint8Array(12)),ct=await crypto.subtle.encrypt({name:'AES-GCM',iv},wk,enc.encode(priv));
+        await post('/api/recover/finish',{phone:id,recAuth:d.auth,auth:await authOf(pw,id),encPriv:JSON.stringify({iv:b64(iv),ct:b64(ct)})});
+        finish(id,pw,'Your password was changed. All your contacts and your account are the same as before.');
+      }catch(x){c.querySelector('.er').textContent=x.message;b.disabled=false;cfDone()}
+    };
+  }
+  function code(pre){
+    c.innerHTML=head('Reset with admin code',1)+`<p>Enter the code the admin gave you. A <b>new password and new keys</b> are made. Old chats can’t be restored (they vanish after 24 hours anyway).</p>`+fields(`<input id="fcd" placeholder="ABCD-EFGH" autocapitalize="characters" autocomplete="off" spellcheck="false" value="${esc(pre||'')}">`)+'<button class="go" id="fgo" style="margin:0">Set new password</button>';
+    wire(menu);mkCf();
+    c.querySelector('#fgo').onclick=async()=>{
+      const id=phoneOf(),pw=id&&checkPw(),cd=c.querySelector('#fcd').value;if(!id||!pw)return;if(cfNeed())return;
+      const b=c.querySelector('#fgo');b.disabled=true;c.querySelector('.er').textContent='Making new keys…';
+      try{
+        const kp=await crypto.subtle.generateKey({name:'ECDH',namedCurve:'P-256'},true,['deriveKey']),pub=JSON.stringify(await crypto.subtle.exportKey('jwk',kp.publicKey)),priv=JSON.stringify(await crypto.subtle.exportKey('jwk',kp.privateKey));
+        const wk=await wrapKey(pw,id),iv=crypto.getRandomValues(new Uint8Array(12)),ct=await crypto.subtle.encrypt({name:'AES-GCM',iv},wk,enc.encode(priv));
+        await post('/api/reset',{phone:id,code:cd,auth:await authOf(pw,id),pub,encPriv:JSON.stringify({iv:b64(iv),ct:b64(ct)}),cf:tk2});
+        localStorage.removeItem('lk_help');finish(id,pw,'New password set. After you log in, create a Recovery key in Settings so this never happens again.');
+      }catch(x){c.querySelector('.er').textContent=x.message;b.disabled=false;cfDone()}
+    };
+  }
+  function help(){
+    c.innerHTML=head('Ask the admin',1)+`<p>Tell the admins what happened. They check that you are the owner and answer here. You can come back any time with “Check my request”.</p>
+      <select id="hk" style="padding:12px;border-radius:14px;background:rgba(255,255,255,.08);color:#fff;border:1px solid rgba(255,255,255,.18);font-size:16px"><option value="forgot">I forgot my password</option><option value="problem">Something else / report a problem</option></select>
+      <input id="fph" type="tel" placeholder="Your phone number" inputmode="tel" value="${esc(myPhone())}"><input id="fnm" placeholder="Your name on Lynko" maxlength="30">
+      <textarea id="ftx" maxlength="1000" placeholder="Write a few words… (e.g. when you made the account, names of people in your contacts — it helps the admin check it is you)"></textarea><div class="cf2" style="display:flex;justify-content:center"></div><div class="er"></div><button class="go" id="fgo" style="margin:0">Send to admins</button>`;
+    wire(menu);mkCf();
+    c.querySelector('#fgo').onclick=async()=>{
+      const kind=c.querySelector('#hk').value,raw=c.querySelector('#fph').value,id=raw.trim()?ident(raw):'',txt=c.querySelector('#ftx').value.trim();
+      if(kind=='forgot'&&!/^\d{8,15}$/.test(id)){c.querySelector('.er').textContent='Enter your phone number';return}if(txt.length<3){c.querySelector('.er').textContent='Write a few words';return}if(cfNeed())return;
+      const b=c.querySelector('#fgo');b.disabled=true;c.querySelector('.er').textContent='';
+      try{const r=await post('/api/help/new',{kind,phone:id||undefined,name:c.querySelector('#fnm').value.trim(),text:txt,cf:tk2});localStorage.setItem('lk_help',JSON.stringify({tid:r.tid,key:r.key,phone:id}));thread()}
+      catch(x){c.querySelector('.er').textContent=x.message;b.disabled=false;cfDone()}
+    };
+  }
+  async function thread(){
+    const h=JSON.parse(localStorage.getItem('lk_help')||'null');if(!h)return menu();let last='';
+    const draw=d=>{
+      const sig=d.msgs.length+d.status+(d.reset?d.reset.code:'');if(sig===last)return;last=sig;
+      c.innerHTML=head('Your request',1)+'<div style="display:grid;gap:6px">'+d.msgs.map(m=>`<div class="m ${m.from=='user'?'u':m.from=='admin'?'a':'s'}">${esc(m.t)}</div>`).join('')+'</div>'+
+        (d.reset?`<p class="ok">✅ The admin approved your reset. Your code:</p><div class="key">${esc(d.reset.code)}</div><button class="go" id="fcode" style="margin:0">Set my new password</button>`:'')+
+        (d.status=='open'?'<textarea id="frp" maxlength="1000" placeholder="Write a reply…"></textarea><div class="er"></div><button class="go" id="fsend" style="margin:0">Send</button>':'<p>This request is closed.</p><button class="opt" id="fnew">Start a new request</button>');
+      wire(menu);const fc=c.querySelector('#fcode');if(fc)fc.onclick=()=>{clearTimeout(timer);code(d.reset.code)};
+      const fs=c.querySelector('#fsend');if(fs)fs.onclick=async()=>{const t=c.querySelector('#frp').value.trim();if(!t)return;fs.disabled=true;try{const r=await post('/api/help/reply',{tid:h.tid,key:h.key,text:t});last='';draw(r)}catch(x){c.querySelector('.er').textContent=x.message;fs.disabled=false}};
+      const fn=c.querySelector('#fnew');if(fn)fn.onclick=()=>{localStorage.removeItem('lk_help');help()};
+    };
+    const poll=async()=>{try{draw(await post('/api/help/get',{tid:h.tid,key:h.key}))}catch(x){if(/not found/i.test(x.message)){localStorage.removeItem('lk_help');return menu()}}timer=setTimeout(poll,5000)};
+    c.innerHTML=head('Your request',1)+'<p>Loading…</p>';wire(menu);poll();
+  }
+  (first=='help'?help:menu)();
+}
+$('forgot').onclick=()=>forgot();
 fetch('/api/me').then(r=>{if(r.ok&&localStorage.getItem('lynko_enc'))location.href='/chat'});
 </script>
 <script>['gesturestart','gesturechange','gestureend'].forEach(function(e){document.addEventListener(e,function(x){x.preventDefault()},{passive:false})})</script></body>
