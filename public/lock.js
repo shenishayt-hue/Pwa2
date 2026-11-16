@@ -47,8 +47,48 @@ ov.innerHTML = `<form class="lkc" id="lkform" autocomplete="on"><div class="lklo
 ov.querySelector('form').onsubmit = e => { e.preventDefault(); unlock() };
 document.body.appendChild(ov);
 
+// ───────── fingerprint / face unlock ─────────
+// The OS biometric check (WebAuthn, userVerification required) releases the private key that was stored on THIS phone, encrypted with a non-extractable key.
+// It is a convenience gate on the device (no server involved); the password still always works.
+const BIO = (() => {
+  const K = 'lk_bio', enc = new TextEncoder(), dec = new TextDecoder();
+  const b64 = b => { let s = '', u = new Uint8Array(b); for (let i = 0; i < u.length; i += 32768) s += String.fromCharCode.apply(null, u.subarray(i, i + 32768)); return btoa(s) };
+  const unb64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+  const idb = () => new Promise((res, rej) => { const r = indexedDB.open('lynko-bio', 1); r.onupgradeneeded = () => r.result.createObjectStore('k'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error) });
+  const kget = async () => { const d = await idb(); return new Promise(r => { const q = d.transaction('k').objectStore('k').get('key'); q.onsuccess = () => r(q.result) }) };
+  const kput = async k => { const d = await idb(); return new Promise((res, rej) => { const t = d.transaction('k', 'readwrite'); t.objectStore('k').put(k, 'key'); t.oncomplete = res; t.onerror = () => rej(t.error) }) };
+  const supported = async () => !!(window.PublicKeyCredential && PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable && await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable().catch(() => false));
+  const on = () => !!localStorage.getItem(K);
+  async function enable() {
+    const priv = sessionStorage.getItem('lynko_priv'); if (!priv) throw new Error('locked');
+    const cred = await navigator.credentials.create({ publicKey: { rp: { name: 'Lynko' }, user: { id: crypto.getRandomValues(new Uint8Array(16)), name: uid() || 'user', displayName: localStorage.getItem('lynko_name') || 'Lynko' }, challenge: crypto.getRandomValues(new Uint8Array(32)), pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }], authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required', residentKey: 'discouraged' }, timeout: 60000 } });
+    const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']); await kput(key);
+    const iv = crypto.getRandomValues(new Uint8Array(12)), ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(priv));
+    localStorage.setItem(K, JSON.stringify({ cred: b64(cred.rawId), iv: b64(iv), ct: b64(ct) }));
+  }
+  async function unlockWith() {
+    const r = JSON.parse(localStorage.getItem(K)); if (!r) return null;
+    await navigator.credentials.get({ publicKey: { challenge: crypto.getRandomValues(new Uint8Array(32)), allowCredentials: [{ type: 'public-key', id: unb64(r.cred) }], userVerification: 'required', timeout: 60000 } });
+    return dec.decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(r.iv) }, await kget(), unb64(r.ct)));
+  }
+  const off = () => { localStorage.removeItem(K); try { indexedDB.deleteDatabase('lynko-bio') } catch {} };
+  return { supported, on, enable, unlock: unlockWith, off };
+})();
+window.BIO = BIO;
+const bioBtn = document.createElement('button'); bioBtn.type = 'button'; bioBtn.id = 'lkbio'; bioBtn.className = 'lkout'; bioBtn.hidden = true; bioBtn.textContent = '🧬 Use fingerprint / face';
+async function bioTry() {
+  try {
+    const priv = await BIO.unlock(); if (!priv) return;
+    clear('app'); sessionStorage.setItem('lynko_priv', priv); if (stay()) localStorage.setItem('lynko_priv', priv);
+    locked = false; ov.hidden = true; $('lkp').value = ''; resolveReady();
+  } catch { $('lkerr').textContent = 'Fingerprint didn’t work — use your password' }
+}
+bioBtn.onclick = bioTry;
+
 function show() {
   locked = true; ov.hidden = false;
+  if (!bioBtn.parentNode) $('lkgo').after(bioBtn);
+  bioBtn.hidden = !BIO.on(); if (BIO.on()) setTimeout(() => { if (locked) bioTry() }, 350);
   const n = localStorage.getItem('lynko_name') || '';
   $('lkn').textContent = n; $('lkav').textContent = (n || '♥')[0].toUpperCase(); $('lkp').value = ''; $('lkerr').textContent = ''; $('lkuser').value = localStorage.getItem('lynko_ident') || '';
   setTimeout(() => $('lkp').focus(), 60);
@@ -67,7 +107,7 @@ $('lkgo').onclick = unlock; $('lkp').addEventListener('keydown', e => { if (e.ke
 $('lkout').onclick = async () => {
   if (!confirm('Log out of this phone? You will need your password to log in again.')) return;
   try { await fetch('/api/logout', { method: 'POST' }) } catch {}
-  localStorage.removeItem('lynko_enc'); localStorage.removeItem('lynko_priv'); sessionStorage.clear(); try { await caches.delete('lynko-api-v2') } catch {} try { window.OFF && OFF.wipe() } catch {} location.href = '/';
+  localStorage.removeItem('lynko_enc'); localStorage.removeItem('lynko_priv'); try { BIO.off() } catch {} sessionStorage.clear(); try { await caches.delete('lynko-api-v2') } catch {} try { window.OFF && OFF.wipe() } catch {} location.href = '/';
 };
 
 // first load: no unlocked key in this session = the app was closed -> ask for the password
