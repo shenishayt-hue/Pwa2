@@ -1,8 +1,8 @@
 // App appearance set from the admin dashboard: default theme, "force for everyone", and the app logo.
 // Stored in the `settings` collection (_id 'app'). The logo also feeds the PWA icons (icons.js) and the Lynko Official avatar.
 const icons = require('./icons');
-const THEMES = ['love', 'wa', 'liquid'];
-const state = { theme: 'love', force: false, logoV: 0 };
+const THEMES = ['tg', 'love', 'wa', 'liquid'];
+const state = { theme: 'tg', force: false, logoV: 0 };
 let logo = null, sharp = null; try { sharp = require('sharp'); } catch {}
 
 const pub = () => ({ theme: state.theme, force: state.force, logoV: state.logoV, logo: !!logo });
