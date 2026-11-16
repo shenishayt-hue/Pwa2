@@ -17,6 +17,9 @@ const pusher = new Pusher({ appId: process.env.PUSHER_APP_ID, key: process.env.P
 const C = {};   // collections shared with admin.js (filled once Mongo is connected)
 const store = require('./storage');
 const appcfg = require('./appcfg');
+const sess = require('./sessions')({ C });
+const helpDesk = require('./help');
+const nonce = require('./nonce');
 const mon = require('./admin')({ secret: SECRET, pusher, store, C });
 process.on('unhandledRejection', e => { console.error('unhandledRejection', e); mon.logError('process', e); });
 process.on('uncaughtException', e => { console.error('uncaughtException', e); mon.logError('process', e); setTimeout(() => process.exit(1), 800); });
@@ -26,7 +29,7 @@ const app = express();
 app.set('trust proxy', 1);
 app.use(mon.requests);
 // ── security headers (CSP only lets the page talk to itself + Pusher; no framing; mic/camera only for this origin) ──
-const CSP = ["default-src 'self'", "script-src 'self' 'unsafe-inline' https://js.pusher.com https://challenges.cloudflare.com", "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+const CSP = ["default-src 'self'", "script-src 'self' https://js.pusher.com https://challenges.cloudflare.com", "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src 'self' https://fonts.gstatic.com data:", "img-src 'self' data: blob:", "media-src 'self' blob: data:", "connect-src 'self' https://*.pusher.com wss://*.pusher.com https://challenges.cloudflare.com", "frame-src https://challenges.cloudflare.com",
   "worker-src 'self'", "manifest-src 'self'", "object-src 'none'", "base-uri 'self'", "form-action 'self'", "frame-ancestors 'none'"].join('; ');
 app.use((q, r, n) => {
@@ -36,7 +39,7 @@ app.use((q, r, n) => {
   if (q.secure) r.set('Strict-Transport-Security', 'max-age=15552000; includeSubDomains');
   n();
 });
-app.use(compression({ filter: (q, r) => !q.path.startsWith('/api/blob') && !q.path.startsWith('/api/ai') && !/^\/api\/status\/[^/]+\/blob/.test(q.path) && compression.filter(q, r) }));
+app.use(compression({ filter: (q, r) => !q.path.startsWith('/api/blob') && !q.path.startsWith('/api/ai') && !/^\/api\/(status\/[^/]+\/blob|gblob\/)/.test(q.path) && compression.filter(q, r) }));
 app.use(express.json({ limit: '1mb' }));   // media no longer travels as JSON
 app.use(express.urlencoded({ extended: false }));
 
@@ -47,13 +50,20 @@ const unseal = bin => { const b = raw(bin); const d = crypto.createDecipheriv('a
   d.setAuthTag(b.subarray(12, 28)); return Buffer.concat([d.update(b.subarray(28)), d.final()]); };
 
 const tok = req => ((req.headers.cookie || '').split(';').map(s => s.trim()).find(s => s.startsWith('lynko=')) || '').slice(6);
-const auth = (req, res, next) => { try { req.u = jwt.verify(tok(req), SECRET); mon.touch(req.u.id); next(); } catch { res.status(401).json({ error: 'Login required' }); } };
-const give = (res, u) => res.cookie('lynko', jwt.sign({ id: u.id, u: u.username }, SECRET, { expiresIn: '30d' }),
-  { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' || !!res.req.secure, maxAge: 30 * 864e5 });
+const auth = async (req, res, next) => {
+  let p; try { p = jwt.verify(tok(req), SECRET); if (!(await sess.valid(p))) throw 0; } catch { return res.status(401).json({ error: 'Login required' }); }
+  req.u = p; mon.touch(p.id); next();
+};
+const optAuth = async req => { try { const p = jwt.verify(tok(req), SECRET); return (await sess.valid(p)) ? p : null; } catch { return null; } };
+const give = async (res, u) => {   // u.sid given = keep this device's session (e.g. after a rename), otherwise a new device session is recorded
+  const sid = u.sid || await sess.create(res.req, u);
+  res.cookie('lynko', jwt.sign({ id: u.id, u: u.username, sid }, SECRET, { expiresIn: '30d' }),
+    { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' || !!res.req.secure, maxAge: 30 * 864e5 });
+};
 // ── flood limit: 600 API calls / minute per login session (or per IP when logged out); media + error reports are exempt ──
 const apiHits = new Map();
 app.use('/api', (q, r, n) => {
-  if (/^\/(blob|dp|banner|log-error|status\/[^/]+\/blob)/.test(q.path)) return n();
+  if (/^\/(blob|gblob|dp|banner|log-error|status\/[^/]+\/blob)/.test(q.path)) return n();
   const k = (q.ip || '') + '|' + tok(q).slice(-16), t = Date.now(), a = apiHits.get(k);
   if (!a || t - a.t > 6e4) apiHits.set(k, { t, n: 1 }); else if (++a.n > 600) return r.status(429).json({ error: 'Too many requests — slow down a little' });
   n();
@@ -140,7 +150,7 @@ for (const m of ['get', 'post', 'delete']) { const o = app[m].bind(app);
 // every deploy gets a new version id; it is put into the script URLs of the pages, so phones never keep running an old lock.js / install.js
 const VER = String(process.env.RENDER_GIT_COMMIT || process.env.SOURCE_VERSION || process.env.RAILWAY_GIT_COMMIT_SHA || Date.now()).slice(0, 12);
 const pageCache = {};
-const page = f => (q, r) => { if (!pageCache[f]) pageCache[f] = fs.readFileSync(path.join(__dirname, f), 'utf8').split('{{V}}').join(VER); r.set('Cache-Control', 'no-cache').type('html').send(pageCache[f]); };
+const page = f => (q, r) => { if (!pageCache[f]) pageCache[f] = fs.readFileSync(path.join(__dirname, f), 'utf8').split('{{V}}').join(VER); r.set('Cache-Control', 'no-cache').type('html').send(nonce(pageCache[f], r)); };
 app.get('/health', (q, r) => r.type('text').send('ok'));   // for UptimeRobot (no DB, no login)
 mon.mount(app);                                           // /admin + /admin/api/*
 app.post('/api/log-error', mon.clientError);              // browser error reports (rate limited)
@@ -187,7 +197,7 @@ app.post('/api/register', async (req, res) => {
   let id; do { id = String(crypto.randomInt(10000000, 99999999)); } while (await U.findOne({ id }));
   try { await U.insertOne({ id, phone: ph, username: nm, hash: await bcrypt.hash(a, 12), pub, encPriv, about: '', dpv: 0, contacts: [], createdAt: new Date() }); }
   catch (e) { return res.status(409).json({ error: 'This number is already registered. Log in instead.' }); }
-  mon.count('reg'); give(res, { id, username: nm }); res.json({ id, username: nm });
+  mon.count('reg'); await give(res, { id, username: nm }); res.json({ id, username: nm });
 });
 app.post('/api/login', async (req, res) => {
   if (limited(req.ip)) return res.status(429).json({ error: 'Too many tries. Wait a few minutes.' });
@@ -199,15 +209,19 @@ app.post('/api/login', async (req, res) => {
   else if (b.username) u = await U.findOne({ username: String(b.username).toLowerCase(), phone: { $exists: false }, bot: { $ne: true } });   // accounts made before number login
   const okPw = await bcrypt.compare(String(b.auth || ''), u ? u.hash : DUMMY_HASH);
   if (!u || !okPw) { acctFail(key); mon.count('loginFail'); return res.status(401).json({ error: 'Wrong number or password' }); }
-  acctOk(key); mon.count('login'); give(res, u); res.json({ id: u.id, username: u.username, pub: u.pub, encPriv: u.encPriv });
+  acctOk(key); mon.count('login'); await give(res, u); res.json({ id: u.id, username: u.username, pub: u.pub, encPriv: u.encPriv });
 });
-app.post('/api/logout', (q, r) => { r.clearCookie('lynko'); r.json({ ok: 1 }); });
+app.post('/api/logout', async (q, r) => { try { const p = jwt.verify(tok(q), SECRET); if (p.sid) await sess.revoke(p.id, p.sid); } catch {} r.clearCookie('lynko'); r.json({ ok: 1 }); });
+// ── logged-in devices ──
+app.get('/api/sessions', auth, async (q, r) => r.json(await sess.list(q.u.id, q.u.sid)));
+app.delete('/api/sessions/:sid', auth, async (q, r) => r.json({ ok: await sess.revoke(q.u.id, String(q.params.sid).slice(0, 24)) }));
+app.post('/api/sessions/others', auth, async (q, r) => { await sess.revokeAll(q.u.id); await give(r, { id: q.u.id, username: q.u.u }); r.json({ ok: 1 }); });
 
 app.get('/api/me', auth, async (req, res) => {
   const me = await U.findOne({ id: req.u.id });
   if (!me) return res.status(401).json({ error: 'Login required' });
   const contacts = await U.find({ id: { $in: me.contacts } }, { projection: PUB }).toArray();
-  res.json({ id: me.id, username: me.username, phone: me.phone || null, pub: me.pub, about: me.about || '', dpv: me.dpv || 0, bnv: me.bnv || 0, hideSeen: !!me.hideSeen, contacts });
+  res.json({ id: me.id, username: me.username, phone: me.phone || null, pub: me.pub, about: me.about || '', dpv: me.dpv || 0, bnv: me.bnv || 0, hideSeen: !!me.hideSeen, rec: !!me.recAuthHash, contacts });
 });
 app.post('/api/contacts', auth, async (req, res) => {
   const raw = String(req.body.id || '').trim();
@@ -246,7 +260,7 @@ app.post('/api/profile', auth, async (req, res) => {
   await U.updateOne({ id: req.u.id }, { $set: set });
   const u = await U.findOne({ id: req.u.id }, { projection: { contacts: 1, about: 1, dpv: 1, bnv: 1 } });
   fire(u.contacts, 'prof', { id: req.u.id });
-  if (newName) give(res, { id: req.u.id, username: newName });   // refresh the login cookie with the new name
+  if (newName) await give(res, { id: req.u.id, username: newName, sid: req.u.sid });   // refresh the login cookie with the new name
   res.json({ about: u.about, dpv: u.dpv, bnv: u.bnv || 0, username: newName || undefined });
 });
 // DP + banner: the URL carries ?v=<version>, so a copy kept in memory can never be stale -> no database read after the first request
@@ -324,6 +338,8 @@ app.get('/api/blob/:id', auth, async (req, res) => {
   if (!m || !m.bkey || !store || (m.from !== req.u.id && m.to !== req.u.id)) return res.status(404).end();
   await store.send(m.bkey, res, { 'X-IV': m.bIv, 'Cache-Control': 'private, max-age=3600' });
 });
+require('./groups')({ app, auth, C, fire, store, seal, unseal, mine, push, mon, PUB });
+helpDesk.create({ app, auth, optAuth, C, bcrypt, normPhone, human, limited, mon, sess, fire }).mount();
 app.delete('/api/messages/:id', auth, async (req, res) => {
   let m; try { m = await M.findOne({ _id: new ObjectId(req.params.id) }); } catch {}
   if (!m || m.from !== req.u.id) return res.status(403).json({ error: 'Only the sender can delete' });
@@ -684,7 +700,7 @@ app.use((e, q, r, n) => {
   const cl = await MongoClient.connect(process.env.MONGODB_URI, { maxPoolSize: 20, minPoolSize: 3, w: 1, retryWrites: true });   // w:1 = the server answers as soon as the primary has saved it
   const db = cl.db(process.env.MONGODB_DB || 'lynko');
   U = db.collection('users'); M = db.collection('messages'); S = db.collection('statuses'); K = db.collection('calls');
-  Object.assign(C, { db, U, M, S, E: db.collection('errors'), D: db.collection('stats'), O: db.collection('official') });
+  Object.assign(C, { db, U, M, S, E: db.collection('errors'), D: db.collection('stats'), O: db.collection('official'), SS: db.collection('sessions'), T: db.collection('tickets'), GR: db.collection('groups'), GM: db.collection('gmessages') });
   await appcfg.load(C).catch(e => console.warn('appearance settings:', e.message));
   await U.createIndex({ id: 1 }, { unique: true }); try { await U.dropIndex('username_1'); } catch {} await U.createIndex({ username: 1 });
   const phoneIx = { unique: true, partialFilterExpression: { phone: { $type: 'string' } } };
@@ -693,6 +709,9 @@ app.use((e, q, r, n) => {
   await M.createIndex({ conv: 1, createdAt: 1 }); await M.createIndex({ to: 1, d: 1 }); await M.createIndex({ createdAt: 1 }, { expireAfterSeconds: 86400 });
   await S.createIndex({ from: 1, createdAt: -1 }); await S.createIndex({ createdAt: 1 }, { expireAfterSeconds: 86400 });
   await U.createIndex({ createdAt: 1 }); await U.createIndex({ lastSeen: 1 });
+  await C.SS.createIndex({ sid: 1 }, { unique: true }); await C.SS.createIndex({ uid: 1, lastSeen: -1 }); await C.SS.createIndex({ createdAt: 1 }, { expireAfterSeconds: 30 * 86400 });
+  await C.T.createIndex({ tid: 1 }, { unique: true }); await C.T.createIndex({ status: 1, updatedAt: -1 }); await C.T.createIndex({ uid: 1 }); await C.T.createIndex({ phone: 1 });
+  await C.GR.createIndex({ members: 1 }); await C.GM.createIndex({ gid: 1, createdAt: 1 }); await C.GM.createIndex({ createdAt: 1 }, { expireAfterSeconds: 86400 });
   await bots.init();
   await K.createIndex({ cid: 1 }, { unique: true }); await K.createIndex({ from: 1, ts: -1 }); await K.createIndex({ to: 1, ts: -1 }); await K.createIndex({ ts: 1 }, { expireAfterSeconds: 30 * 86400 });
   setInterval(async () => {   // callers that vanished: ringing > 50s = missed; calls "active" > 4h = ended
