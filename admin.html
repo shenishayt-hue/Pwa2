@@ -92,7 +92,7 @@ pre{white-space:pre-wrap;word-break:break-all;font:12px/1.5 ui-monospace,monospa
   <div class="top">
     <div class="row1"><b class="lg">Lynko Admin</b><small id="upd"></small><button class="btn s" id="out">Log out</button></div>
     <div class="tabs" id="tabs">
-      <button data-t="ov" class="on">Overview</button><button data-t="of">Official</button><button data-t="er">Errors<em id="ebadge" hidden></em></button><button data-t="us">Users</button><button data-t="ap">Appearance</button>
+      <button data-t="ov" class="on">Overview</button><button data-t="of">Official</button><button data-t="er">Errors<em id="ebadge" hidden></em></button><button data-t="us">Users</button><button data-t="ap">Appearance</button><button data-t="hp">Help</button>
     </div>
   </div>
   <main>
@@ -126,11 +126,17 @@ pre{white-space:pre-wrap;word-break:break-all;font:12px/1.5 ui-monospace,monospa
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px"><h2 style="margin:0">Errors (grouped)</h2><button class="btn d s" id="eclr">Clear all</button></div>
       <div id="elist"></div>
     </section>
+    <!-- help desk -->
+    <section id="t-hp" hidden>
+      <div id="hplist"></div>
+      <div id="hpview" hidden></div>
+    </section>
     <!-- appearance -->
     <section id="t-ap" hidden>
       <h2>App theme</h2>
       <div class="box">
         <div id="thm" class="thc">
+          <button data-th="tg" class="tc"><i style="background:linear-gradient(135deg,#3e88f7,#000)"></i><b>Telegram style</b><small>Black + iOS blue, floating tab bar</small></button>
           <button data-th="love" class="tc"><i style="background:linear-gradient(135deg,#ff5c8a,#8d3bd6)"></i><b>Lynko Love 💕</b><small>Romantic dark, floating hearts</small></button>
           <button data-th="wa" class="tc"><i style="background:linear-gradient(135deg,#00a884,#0b141a)"></i><b>WhatsApp style</b><small>Dark teal, green accents</small></button>
           <button data-th="liquid" class="tc"><i style="background:linear-gradient(135deg,#ffffff,#9db8ff)"></i><b>White Liquid ✨</b><small>Light frosted-glass look</small></button>
@@ -177,11 +183,42 @@ $('out').onclick=async()=>{await api('/admin/api/logout','POST').catch(()=>{});s
 let tab='ov',timer;
 document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{tab=b.dataset.t;
   document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('on',x==b));
-  ['ov','of','er','us','ap'].forEach(t=>$('t-'+t).hidden=t!=tab);load()});
-const load=()=>({ov:overview,of:official,er:errors,us:users,ap:appearance}[tab])().catch(e=>{if(e.message!='Login required')toast(e.message)});
+  ['ov','of','er','us','ap','hp'].forEach(t=>$('t-'+t).hidden=t!=tab);load()});
+const load=()=>({ov:overview,of:official,er:errors,us:users,ap:appearance,hp:helpdesk}[tab])().catch(e=>{if(e.message!='Login required')toast(e.message)});
+
+// ── help desk ──
+const hpE=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const hpAgo=t=>{const s=(Date.now()-new Date(t))/1000;return s<90?'just now':s<3600?Math.round(s/60)+' min ago':s<86400?Math.round(s/3600)+' h ago':Math.round(s/86400)+' d ago'};
+let hpFilter='open',hpOpen=null;
+async function helpdesk(){
+  if(hpOpen)return hpThread(hpOpen);
+  $('hpview').hidden=true;$('hplist').hidden=false;
+  const d=await api('/admin/api/tickets?status='+hpFilter);hpBadge(d.open);
+  $('hplist').innerHTML='<div class="chips" style="margin:10px 0"><button class="'+(hpFilter=='open'?'on':'')+'" data-f="open">Open</button><button class="'+(hpFilter=='closed'?'on':'')+'" data-f="closed">Closed</button></div>'+
+    (d.items.length?d.items.map(t=>`<button class="box hpi" data-t="${hpE(t.tid)}" style="width:100%;text-align:left;display:block;margin:8px 0"><b>${t.unread?'🔴 ':''}${t.kind=='forgot'?'🔑 Forgot password':'🛟 Problem'}${t.name?' · '+hpE(t.name):''}</b><div style="color:var(--mut);font-size:13px;margin-top:4px">${t.phone?'+'+hpE(t.phone)+' · ':''}${t.n} message${t.n==1?'':'s'} · ${hpAgo(t.updatedAt)}${t.resetOpen?' · <span style="color:#7be0a0">reset code active</span>':''}</div><div style="margin-top:6px;font-size:14px">${hpE(t.last)}</div></button>`).join(''):'<p style="color:var(--mut);padding:20px 4px">Nothing here.</p>');
+  $('hplist').querySelectorAll('[data-f]').forEach(b=>b.onclick=()=>{hpFilter=b.dataset.f;helpdesk()});
+  $('hplist').querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>{hpOpen=b.dataset.t;helpdesk()});
+}
+function hpBadge(n){const b=document.querySelector('#tabs button[data-t=hp]');if(b)b.textContent='Help'+(n?' ('+n+')':'')}
+async function hpThread(tid){
+  const t=await api('/admin/api/tickets/'+tid);$('hplist').hidden=true;const v=$('hpview');v.hidden=false;
+  const a=t.acct;
+  v.innerHTML=`<button class="btn" id="hpback" style="margin:10px 0">‹ All requests</button><div class="box"><b>${t.kind=='forgot'?'🔑 Forgot password':'🛟 Problem'}</b> · ${t.status}${t.phone?'<div style="margin-top:4px">Phone: +'+hpE(t.phone)+'</div>':''}${t.name?'<div>Name given: '+hpE(t.name)+'</div>':''}
+    ${a?`<div style="margin-top:8px;color:var(--mut);font-size:13px">Account found: <b style="color:#fff">${hpE(a.username)}</b> · created ${hpAgo(a.createdAt)} · ${a.contacts} contact${a.contacts==1?'':'s'} · recovery key ${a.hasRecovery?'<span style="color:#7be0a0">is set</span> (they can reset by themselves)':'<span style="color:#ffb35c">not set</span>'}</div>`:'<div style="margin-top:8px;color:#ffb35c;font-size:13px">No account with this number.</div>'}</div>
+    <div style="display:grid;gap:6px;margin:12px 0">${t.msgs.map(m=>`<div style="max-width:88%;padding:9px 12px;border-radius:14px;line-height:1.4;white-space:pre-wrap;word-break:break-word;${m.from=='admin'?'justify-self:end;background:#ff5c8a':m.from=='system'?'justify-self:center;background:rgba(255,255,255,.07);font-size:13px;color:var(--mut)':'justify-self:start;background:rgba(255,255,255,.1)'}">${hpE(m.t)}<div style="opacity:.6;font-size:11px;margin-top:3px">${m.from=='user'?'User':m.from=='admin'?'You':''} ${hpAgo(m.ts)}</div></div>`).join('')}</div>
+    ${t.resetCode?`<div class="box" style="border-color:#7be0a0"><b>Reset code (24 h, one use)</b><div style="font:700 24px ui-monospace,monospace;letter-spacing:2px;margin:6px 0">${hpE(t.resetCode)}</div><small style="color:var(--mut)">The person sees this code inside their request. You can also tell it to them yourself.</small></div>`:''}
+    ${t.status=='open'?'<textarea id="hpx" maxlength="1000" placeholder="Reply…" style="width:100%;min-height:80px;border-radius:12px;padding:10px;background:rgba(255,255,255,.07);color:#fff;border:1px solid var(--line);font:16px inherit"></textarea><button class="btn p" id="hpsend" style="width:100%;margin-top:8px">Send reply</button>':''}
+    <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">${t.kind=='forgot'&&t.status=='open'?'<button class="btn" id="hpreset" style="flex:1">🔓 Allow password reset</button>':''}<button class="btn d" id="hpclose" style="flex:1">${t.status=='open'?'Close request':'Re-open'}</button></div>
+    ${t.kind=='forgot'?'<p style="color:var(--mut);font-size:13px;margin-top:10px">⚠️ Allow a reset only after you are sure the person owns this account (ask for the names in their contacts, when they signed up…). A reset gives them the account with a new password; old chats are wiped.</p>':''}`;
+  $('hpback').onclick=()=>{hpOpen=null;helpdesk()};
+  const s=$('hpsend');if(s)s.onclick=async()=>{const x=$('hpx').value.trim();if(!x)return;s.disabled=true;try{await api('/admin/api/tickets/'+tid+'/reply','POST',{text:x});hpThread(tid)}catch(e){toast(e.message);s.disabled=false}};
+  const r=$('hpreset');if(r)r.onclick=async()=>{if(!confirm('Allow this person to set a new password? Only do this if you checked that they own the account.'))return;try{await api('/admin/api/tickets/'+tid+'/reset','POST',{});hpThread(tid)}catch(e){toast(e.message)}};
+  $('hpclose').onclick=async()=>{try{await api('/admin/api/tickets/'+tid+(t.status=='open'?'/close':'/reopen'),'POST',{});hpThread(tid)}catch(e){toast(e.message)}};
+}
+setInterval(()=>{if(!document.hidden)api('/admin/api/tickets?status=open').then(d=>hpBadge(d.open)).catch(()=>{})},30000);
 
 // ── appearance ──
-let selTh='love';
+let selTh='tg';
 const thSel=t=>{selTh=t;document.querySelectorAll('#thm .tc').forEach(c=>c.classList.toggle('on',c.dataset.th==t))};
 document.querySelectorAll('#thm .tc').forEach(c=>c.onclick=()=>thSel(c.dataset.th));
 const lgShow=d=>{$('lgprev').src=(d.logo?'/icons/icon-192.png?v='+d.logoV:'/icons/icon-192.png?x='+Date.now())};
