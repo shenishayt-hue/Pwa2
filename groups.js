@@ -4,11 +4,14 @@ const { ObjectId } = require('mongodb');
 const MAXM = 64;
 const clean = (t, n) => String(t || '').replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, n);
 const idOk = s => typeof s === 'string' && /^\d{8}$/.test(s);
+let sharp = null; try { sharp = require('sharp'); } catch {}
+const bin = x => Buffer.isBuffer(x) ? x : Buffer.from(x.buffer.subarray(0, x.length()));
+const isImg = b => b.length > 12 && ((b[0] === 0x89 && b[1] === 0x50) || (b[0] === 0xff && b[1] === 0xd8) || (b.toString('ascii', 0, 4) === 'RIFF' && b.toString('ascii', 8, 12) === 'WEBP'));
 const wrapOk = w => w && typeof w.iv === 'string' && typeof w.ct === 'string' && w.iv.length < 64 && w.ct.length < 400;
 
 module.exports = function groups({ app, auth, C, fire, store, seal, unseal, mine, push, mon, PUB }) {
   const oid = s => { try { return new ObjectId(String(s)); } catch { return null; } };
-  const getG = async (gid, uid) => { const _id = oid(gid); if (!_id) return null; const g = await C.GR.findOne({ _id }); return g && g.members.includes(uid) ? g : null; };
+  const getG = async (gid, uid) => { const _id = oid(gid); if (!_id) return null; const g = await C.GR.findOne({ _id }, { projection: { logo: 0 } }); return g && g.members.includes(uid) ? g : null; };
   const isAdmin = (g, uid) => g.owner === uid || (g.admins || []).includes(uid);
   const outM = m => ({ id: m._id.toString(), gid: m.gid, from: m.from, kind: m.kind, iv: m.iv, bIv: m.bIv || null, ct: unseal(m.ct).toString('base64'), media: !!m.bkey, ts: m.createdAt.toISOString() });
   const changed = (g, extra) => fire(g.members.concat(extra || []), 'ggrp', { gid: g._id.toString() });
@@ -17,7 +20,7 @@ module.exports = function groups({ app, auth, C, fire, store, seal, unseal, mine
     const ids = [...new Set(g.members)];
     const us = await C.U.find({ id: { $in: ids } }, { projection: PUB }).toArray();
     const k = g.keys && g.keys[uid];
-    const r = { id: g._id.toString(), name: g.name, owner: g.owner, admins: g.admins || [], members: us.map(u => ({ id: u.id, username: u.username, pub: u.pub, dpv: u.dpv || 0 })), key: k ? { by: k.by, iv: k.iv, ct: k.ct } : null, createdAt: g.createdAt };
+    const r = { id: g._id.toString(), name: g.name, desc: g.desc || '', logoV: g.logoV || 0, owner: g.owner, admins: g.admins || [], members: us.map(u => ({ id: u.id, username: u.username, pub: u.pub, dpv: u.dpv || 0 })), key: k ? { by: k.by, iv: k.iv, ct: k.ct } : null, createdAt: g.createdAt };
     if (withLast) {
       const last = await C.GM.find({ gid: r.id }).sort({ createdAt: -1 }).limit(1).toArray();
       const since = (g.reads && g.reads[uid]) || new Date(0);
@@ -28,7 +31,7 @@ module.exports = function groups({ app, auth, C, fire, store, seal, unseal, mine
   }
 
   app.get('/api/groups', auth, async (req, res) => {
-    const gs = await C.GR.find({ members: req.u.id }).limit(100).toArray();
+    const gs = await C.GR.find({ members: req.u.id }, { projection: { logo: 0 } }).limit(100).toArray();
     res.json(await Promise.all(gs.map(g => card(g, req.u.id))));
   });
   app.post('/api/groups', auth, async (req, res) => {
@@ -62,6 +65,7 @@ module.exports = function groups({ app, auth, C, fire, store, seal, unseal, mine
     if (!g) return res.status(404).json({ error: 'Group not found' });
     if (!isAdmin(g, me)) return res.status(403).json({ error: 'Only admins can remove people' });
     if (!g.members.includes(t) || t === g.owner) return res.status(400).json({ error: 'Can’t remove this person' });
+    if ((g.admins || []).includes(t) && g.owner !== me) return res.status(403).json({ error: 'Only the group owner can remove an admin' });
     await C.GR.updateOne({ _id: g._id }, { $pull: { members: t, admins: t }, $unset: { ['keys.' + t]: 1 } });
     changed(g); res.json({ ok: 1 });
   });
@@ -84,6 +88,32 @@ module.exports = function groups({ app, auth, C, fire, store, seal, unseal, mine
     if (!g) return res.status(404).json({ error: 'Group not found' }); if (g.owner !== req.u.id) return res.status(403).json({ error: 'Only the group owner can do this' });
     if (!g.members.includes(t) || t === g.owner) return res.status(400).json({ error: 'Bad member' });
     await C.GR.updateOne({ _id: g._id }, on ? { $addToSet: { admins: t } } : { $pull: { admins: t } }); changed(g); res.json({ ok: 1 });
+  });
+  // ── group description + group photo (admins only). The photo is re-encoded to a 256 px JPEG on the server. ──
+  app.post('/api/groups/:id/desc', auth, async (req, res) => {
+    const g = await getG(req.params.id, req.u.id); if (!g) return res.status(404).json({ error: 'Group not found' });
+    if (!isAdmin(g, req.u.id)) return res.status(403).json({ error: 'Only admins can change the description' });
+    const desc = String((req.body || {}).desc || '').replace(/[\u0000-\u0009\u000b-\u001f<>]/g, '').trim().slice(0, 300);
+    await C.GR.updateOne({ _id: g._id }, desc ? { $set: { desc } } : { $unset: { desc: 1 } }); changed(g); res.json({ ok: 1 });
+  });
+  app.post('/api/groups/:id/logo', auth, require('express').raw({ type: 'application/octet-stream', limit: '400kb' }), async (req, res) => {
+    const g = await getG(req.params.id, req.u.id); if (!g) return res.status(404).json({ error: 'Group not found' });
+    if (!isAdmin(g, req.u.id)) return res.status(403).json({ error: 'Only admins can change the group photo' });
+    let buf = req.body; if (!Buffer.isBuffer(buf) || !isImg(buf)) return res.status(400).json({ error: 'Use a PNG, JPG or WebP image' });
+    if (sharp) { try { buf = await sharp(buf).rotate().resize(256, 256, { fit: 'cover' }).jpeg({ quality: 82 }).toBuffer(); } catch { return res.status(400).json({ error: 'That image could not be read' }); } }
+    else if (buf.length > 150 * 1024) return res.status(400).json({ error: 'Image is too large' });
+    const logoV = Date.now();
+    await C.GR.updateOne({ _id: g._id }, { $set: { logo: buf, logoV } }); changed(g); res.json({ ok: 1, logoV });
+  });
+  app.delete('/api/groups/:id/logo', auth, async (req, res) => {
+    const g = await getG(req.params.id, req.u.id); if (!g) return res.status(404).json({ error: 'Group not found' });
+    if (!isAdmin(g, req.u.id)) return res.status(403).json({ error: 'Only admins can change the group photo' });
+    await C.GR.updateOne({ _id: g._id }, { $unset: { logo: 1 }, $set: { logoV: 0 } }); changed(g); res.json({ ok: 1 });
+  });
+  app.get('/api/glogo/:id', auth, async (req, res) => {
+    const _id = oid(req.params.id), g = _id && await C.GR.findOne({ _id }, { projection: { members: 1, logo: 1 } });
+    if (!g || !g.logo || !g.members.includes(req.u.id)) return res.status(404).end();
+    res.set({ 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=86400' }).send(bin(g.logo));
   });
   app.post('/api/groups/:id/read', auth, async (req, res) => {
     const g = await getG(req.params.id, req.u.id); if (!g) return res.status(404).json({ error: 'Group not found' });
