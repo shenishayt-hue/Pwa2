@@ -67,7 +67,7 @@ const give = async (res, u) => {   // u.sid given = keep this device's session (
 // ── flood limit: 600 API calls / minute per login session (or per IP when logged out); media + error reports are exempt ──
 const apiHits = new Map();
 app.use('/api', (q, r, n) => {
-  if (/^\/(blob|gblob|dp|banner|log-error|status\/[^/]+\/blob)/.test(q.path)) return n();
+  if (/^\/(blob|gblob|glogo|dp|banner|log-error|status\/[^/]+\/blob)/.test(q.path)) return n();
   const k = (q.ip || '') + '|' + tok(q).slice(-16), t = Date.now(), a = apiHits.get(k);
   if (!a || t - a.t > 6e4) apiHits.set(k, { t, n: 1 }); else if (++a.n > 600) { sec.strike(q, 'flood', 3, q.path); return r.status(429).json({ error: 'Too many requests — slow down a little' }); }
   n();
@@ -93,7 +93,7 @@ const acctOk = k => acct.delete(k);
 const DUMMY_HASH = bcrypt.hashSync('lynko-dummy', 12);   // compared when the account doesn't exist, so timing doesn't reveal who has an account
 const tries = new Map();
 const limited = ip => { const n = (tries.get(ip) || 0) + 1; tries.set(ip, n); setTimeout(() => tries.delete(ip), 6e5); if (n > 15) sec.strike(ip, 'tooManyTries', 2); return n > 15; };
-const chan = id => 'private-u-' + id;
+const chan = id => 'private-u-' + String(id).replace(/[^\w\-=@,.;]/g, '_');   // Pusher refuses other characters (a ":" made /api/typing crash)
 const conv = (a, b) => [a, b].sort().join(':');
 const fire = (ids, ev, data) => { if (ids.length) pusher.trigger(ids.map(chan), ev, data).catch(() => {}); };
 const PUB = { _id: 0, id: 1, username: 1, pub: 1, about: 1, dpv: 1, bnv: 1, bot: 1, handle: 1 };
@@ -392,7 +392,15 @@ app.post('/api/read', auth, async (req, res) => {
   }
   res.json({ ok: 1 });
 });
-app.post('/api/typing', auth, (req, res) => { if (bots.isBot(req.body.to)) return res.status(204).end(); fire([String(req.body.to)], 'typing', { from: req.u.id, stop: !!req.body.stop }); res.status(204).end(); });
+app.post('/api/typing', auth, async (req, res) => {
+  const to = String(req.body.to || '').slice(0, 40), stop = !!req.body.stop;
+  if (to.startsWith('g:')) {   // group chat: tell the other members (the app shows "typing…" on the group)
+    try { const g = await C.GR.findOne({ _id: new ObjectId(to.slice(2)) }); if (g && g.members.includes(req.u.id)) fire(g.members.filter(x => x !== req.u.id), 'typing', { from: to, stop }); } catch {}
+    return res.status(204).end();
+  }
+  if (!to || bots.isBot(to)) return res.status(204).end();
+  fire([to], 'typing', { from: req.u.id, stop }); res.status(204).end();
+});
 const EMO = ['❤️', '😍', '🥰', '😘', '😂', '😢', '🔥', '👍'];
 app.post('/api/react', auth, async (req, res) => {
   let m; try { m = await M.findOne({ _id: new ObjectId(req.body.id) }); } catch {}
@@ -628,11 +636,11 @@ async function askSupun(prompt, signal) {
     const u = new URL(SUPUN_URL); u.searchParams.set('prompt', prompt.slice(-3500)); u.searchParams.set('model', SUPUN_MODEL); u.searchParams.set('apikey', SUPUN_KEY);
     const r = await fetch(u, { signal: sig(), headers: { Accept: 'application/json' } });
     if (r.status === 401 || r.status === 403) { const e = new Error('Supun key rejected'); e.auth = true; throw e; }
-    const j = await r.json().catch(() => null); if (!r.ok || !j || j.success === false) throw new Error('get ' + r.status);
+    const j = await r.json().catch(() => null); if (!r.ok || !j || j.success === false) throw new Error('get ' + r.status + ' ' + JSON.stringify(j || {}).slice(0, 120));
     const out = supunText(j); if (!out) throw new Error('empty'); return out;
   };
   let err, auths = 0;
-  for (const f of [tryPost, tryGet, tryPost]) {
+  for (const f of [tryGet, tryPost, tryGet]) {   // this API reads the prompt from the query string, so GET goes first; the last error shown is then the real one
     if (auths >= 2) break;   // POST and GET both said "bad key": no point trying again
     try { return await f() } catch (e) { err = e; if (e.auth) auths++; if (signal && signal.aborted) break; }
   }
