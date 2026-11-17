@@ -20,13 +20,17 @@ const appcfg = require('./appcfg');
 const sess = require('./sessions')({ C });
 const helpDesk = require('./help');
 const nonce = require('./nonce');
-const mon = require('./admin')({ secret: SECRET, pusher, store, C });
+const sec = require('./security')({ C });
+const mon = require('./admin')({ secret: SECRET, pusher, store, C, sec });
 process.on('unhandledRejection', e => { console.error('unhandledRejection', e); mon.logError('process', e); });
 process.on('uncaughtException', e => { console.error('uncaughtException', e); mon.logError('process', e); setTimeout(() => process.exit(1), 800); });
 for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => mon.flush().finally(() => process.exit(0)));
 
 const app = express();
 app.set('trust proxy', 1);
+app.disable('x-powered-by');
+app.get('/health', (q, r) => r.type('text').send('ok'));   // before the IP gate: Render / UptimeRobot checks always work
+app.use(sec.gate);   // blocked IPs and scanner probes stop here
 app.use(mon.requests);
 // ── security headers (CSP only lets the page talk to itself + Pusher; no framing; mic/camera only for this origin) ──
 const CSP = ["default-src 'self'", "script-src 'self' https://js.pusher.com https://challenges.cloudflare.com", "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
@@ -65,7 +69,7 @@ const apiHits = new Map();
 app.use('/api', (q, r, n) => {
   if (/^\/(blob|gblob|dp|banner|log-error|status\/[^/]+\/blob)/.test(q.path)) return n();
   const k = (q.ip || '') + '|' + tok(q).slice(-16), t = Date.now(), a = apiHits.get(k);
-  if (!a || t - a.t > 6e4) apiHits.set(k, { t, n: 1 }); else if (++a.n > 600) return r.status(429).json({ error: 'Too many requests — slow down a little' });
+  if (!a || t - a.t > 6e4) apiHits.set(k, { t, n: 1 }); else if (++a.n > 600) { sec.strike(q, 'flood', 3, q.path); return r.status(429).json({ error: 'Too many requests — slow down a little' }); }
   n();
 });
 setInterval(() => apiHits.clear(), 6e5).unref();
@@ -88,7 +92,7 @@ const acctFail = k => { const n = Date.now(); let a = acct.get(k); if (!a || n -
 const acctOk = k => acct.delete(k);
 const DUMMY_HASH = bcrypt.hashSync('lynko-dummy', 12);   // compared when the account doesn't exist, so timing doesn't reveal who has an account
 const tries = new Map();
-const limited = ip => { const n = (tries.get(ip) || 0) + 1; tries.set(ip, n); setTimeout(() => tries.delete(ip), 6e5); return n > 15; };
+const limited = ip => { const n = (tries.get(ip) || 0) + 1; tries.set(ip, n); setTimeout(() => tries.delete(ip), 6e5); if (n > 15) sec.strike(ip, 'tooManyTries', 2); return n > 15; };
 const chan = id => 'private-u-' + id;
 const conv = (a, b) => [a, b].sort().join(':');
 const fire = (ids, ev, data) => { if (ids.length) pusher.trigger(ids.map(chan), ev, data).catch(() => {}); };
@@ -151,9 +155,23 @@ for (const m of ['get', 'post', 'delete']) { const o = app[m].bind(app);
 const VER = String(process.env.RENDER_GIT_COMMIT || process.env.SOURCE_VERSION || process.env.RAILWAY_GIT_COMMIT_SHA || Date.now()).slice(0, 12);
 const pageCache = {};
 const page = f => (q, r) => { if (!pageCache[f]) pageCache[f] = fs.readFileSync(path.join(__dirname, f), 'utf8').split('{{V}}').join(VER); r.set('Cache-Control', 'no-cache').type('html').send(nonce(pageCache[f], r)); };
-app.get('/health', (q, r) => r.type('text').send('ok'));   // for UptimeRobot (no DB, no login)
 mon.mount(app);                                           // /admin + /admin/api/*
 app.post('/api/log-error', mon.clientError);              // browser error reports (rate limited)
+// ── maintenance mode (admin dashboard -> Control): pages show a maintenance screen, the API answers 503. /admin, /health, icons, sw.js stay up ──
+const MAINT_OK = /^\/(api\/(appconfig|config|log-error)|sw\.js|manifest\.json|icons\/|img\/|appstate\.js|theme\.js|heal\.js)/;
+const maintPage = () => `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>LYNKO CHAT · Maintenance</title>
+<style>body{margin:0;min-height:100vh;min-height:100dvh;display:grid;place-items:center;padding:24px;box-sizing:border-box;background:radial-gradient(900px 700px at 10% 0%,#4a0d33,transparent 60%),#1a0713;color:#fff0f5;font:16px system-ui,sans-serif;text-align:center}
+.c{max-width:360px}h1{font-size:26px;margin:14px 0 8px}p{color:#d6a6ba;line-height:1.5;white-space:pre-wrap}.i{font-size:56px}button{margin-top:18px;padding:12px 22px;border:0;border-radius:14px;background:linear-gradient(135deg,#ff5c8a,#c14bff);color:#fff;font:700 15px system-ui;cursor:pointer}</style></head>
+<body><div class="c"><div class="i">🛠️</div><h1>We’ll be right back</h1><p id="m"></p><button onclick="location.reload()">Try again</button></div>
+<script>fetch('/api/appconfig',{cache:'no-store'}).then(function(r){return r.json()}).then(function(d){document.getElementById('m').textContent=d.maintMsg||'LYNKO CHAT is under maintenance. Please come back in a little while.';if(!d.maint)location.reload()}).catch(function(){});
+setInterval(function(){fetch('/api/appconfig',{cache:'no-store'}).then(function(r){return r.json()}).then(function(d){if(!d.maint)location.reload()}).catch(function(){})},20000)</script></body></html>`;
+app.use((q, r, n) => {
+  if (!appcfg.state.maint || MAINT_OK.test(q.path) || q.path.startsWith('/admin') || q.path === '/health') return n();
+  r.set('Retry-After', '120');
+  if (q.path.startsWith('/api/')) return r.status(503).json({ error: 'Maintenance — back soon', maintenance: true, msg: appcfg.state.maintMsg });
+  if (q.path === '/' || q.path === '/chat') return r.status(503).set('Cache-Control', 'no-store').type('html').send(nonce(maintPage(), r));
+  n();
+});
 app.get('/', page('index.html'));
 app.get('/chat', page('chat.html'));
 // Terms / Privacy: full page for links, fragment for the in-app viewer
@@ -193,7 +211,7 @@ app.post('/api/register', async (req, res) => {
   if (!nm) return res.status(400).json({ error: 'Enter your name' });
   if (!/^[0-9a-f]{64}$/.test(a || '') || !pub || !encPriv) return res.status(400).json({ error: 'Bad request' });
   if (limited(req.ip)) return res.status(429).json({ error: 'Too many tries. Wait a few minutes.' });
-  if (!(await human(req))) return res.status(403).json({ error: 'Security check failed. Please try again.' });
+  if (!(await human(req))) { sec.strike(req, 'botCheck', 2, req.path); return res.status(403).json({ error: 'Security check failed. Please try again.' }); }
   let id; do { id = String(crypto.randomInt(10000000, 99999999)); } while (await U.findOne({ id }));
   try { await U.insertOne({ id, phone: ph, username: nm, hash: await bcrypt.hash(a, 12), pub, encPriv, about: '', dpv: 0, contacts: [], createdAt: new Date() }); }
   catch (e) { return res.status(409).json({ error: 'This number is already registered. Log in instead.' }); }
@@ -201,14 +219,14 @@ app.post('/api/register', async (req, res) => {
 });
 app.post('/api/login', async (req, res) => {
   if (limited(req.ip)) return res.status(429).json({ error: 'Too many tries. Wait a few minutes.' });
-  if (!(await human(req))) return res.status(403).json({ error: 'Security check failed. Please try again.' });
+  if (!(await human(req))) { sec.strike(req, 'botCheck', 2, req.path); return res.status(403).json({ error: 'Security check failed. Please try again.' }); }
   const b = req.body || {}; let u = null;
   const key = 'a:' + (b.phone ? normPhone(b.phone) || 'x' : String(b.username || '').toLowerCase().slice(0, 40));
-  if (acctLocked(key)) return res.status(429).json({ error: 'Too many wrong tries for this account. Wait 15 minutes.' });
+  if (acctLocked(key)) { sec.strike(req, 'lockedAccountTry', 2, key); } if (acctLocked(key)) return res.status(429).json({ error: 'Too many wrong tries for this account. Wait 15 minutes.' });
   if (b.phone) { const ph = normPhone(b.phone); if (ph) u = await U.findOne({ phone: ph }); }
   else if (b.username) u = await U.findOne({ username: String(b.username).toLowerCase(), phone: { $exists: false }, bot: { $ne: true } });   // accounts made before number login
   const okPw = await bcrypt.compare(String(b.auth || ''), u ? u.hash : DUMMY_HASH);
-  if (!u || !okPw) { acctFail(key); mon.count('loginFail'); return res.status(401).json({ error: 'Wrong number or password' }); }
+  if (!u || !okPw) { acctFail(key); sec.strike(req, 'loginFail', 2, key); mon.count('loginFail'); return res.status(401).json({ error: 'Wrong number or password' }); }
   acctOk(key); mon.count('login'); await give(res, u); res.json({ id: u.id, username: u.username, pub: u.pub, encPriv: u.encPriv });
 });
 app.post('/api/logout', async (q, r) => { try { const p = jwt.verify(tok(q), SECRET); if (p.sid) await sess.revoke(p.id, p.sid); } catch {} r.clearCookie('lynko'); r.json({ ok: 1 }); });
@@ -700,7 +718,8 @@ app.use((e, q, r, n) => {
   const cl = await MongoClient.connect(process.env.MONGODB_URI, { maxPoolSize: 20, minPoolSize: 3, w: 1, retryWrites: true });   // w:1 = the server answers as soon as the primary has saved it
   const db = cl.db(process.env.MONGODB_DB || 'lynko');
   U = db.collection('users'); M = db.collection('messages'); S = db.collection('statuses'); K = db.collection('calls');
-  Object.assign(C, { db, U, M, S, E: db.collection('errors'), D: db.collection('stats'), O: db.collection('official'), SS: db.collection('sessions'), T: db.collection('tickets'), GR: db.collection('groups'), GM: db.collection('gmessages') });
+  Object.assign(C, { db, U, M, S, E: db.collection('errors'), D: db.collection('stats'), O: db.collection('official'), SS: db.collection('sessions'), T: db.collection('tickets'), GR: db.collection('groups'), GM: db.collection('gmessages'), SE: db.collection('secevents'), BL: db.collection('blockedips') });
+  await sec.init().catch(e => console.warn('security init:', e.message));
   await appcfg.load(C).catch(e => console.warn('appearance settings:', e.message));
   await U.createIndex({ id: 1 }, { unique: true }); try { await U.dropIndex('username_1'); } catch {} await U.createIndex({ username: 1 });
   const phoneIx = { unique: true, partialFilterExpression: { phone: { $type: 'string' } } };
