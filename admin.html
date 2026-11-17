@@ -92,7 +92,7 @@ pre{white-space:pre-wrap;word-break:break-all;font:12px/1.5 ui-monospace,monospa
   <div class="top">
     <div class="row1"><b class="lg">Lynko Admin</b><small id="upd"></small><button class="btn s" id="out">Log out</button></div>
     <div class="tabs" id="tabs">
-      <button data-t="ov" class="on">Overview</button><button data-t="of">Official</button><button data-t="er">Errors<em id="ebadge" hidden></em></button><button data-t="us">Users</button><button data-t="ap">Appearance</button><button data-t="hp">Help</button>
+      <button data-t="ov" class="on">Overview</button><button data-t="of">Official</button><button data-t="er">Errors<em id="ebadge" hidden></em></button><button data-t="us">Users</button><button data-t="ap">Appearance</button><button data-t="hp">Help</button><button data-t="mt">Control</button><button data-t="sc">Security<em id="sbadge" hidden></em></button>
     </div>
   </div>
   <main>
@@ -157,6 +157,33 @@ pre{white-space:pre-wrap;word-break:break-all;font:12px/1.5 ui-monospace,monospa
       <input id="uq" placeholder="Search username or ID" autocomplete="off" autocapitalize="none">
       <div class="box" id="ulist" style="margin-top:12px;padding:6px 14px"></div>
     </section>
+    <!-- control: maintenance + release -->
+    <section id="t-mt" hidden>
+      <h2>Maintenance mode</h2>
+      <div class="box">
+        <div id="mstat" style="font-weight:700;margin-bottom:8px"></div>
+        <textarea id="mmsg" maxlength="300" placeholder="Message users will see (optional) — e.g. We are updating LYNKO CHAT. Back in 10 minutes." style="min-height:80px"></textarea>
+        <div style="display:flex;gap:8px;margin-top:10px"><button class="btn p" id="mon" style="flex:1">Turn ON</button><button class="btn" id="moff" style="flex:1">Turn OFF</button></div>
+        <small style="display:block;color:var(--mut);margin-top:10px">ON = everyone (apps and web) sees the maintenance screen and the API answers “503”. This admin dashboard keeps working. When you turn it OFF, open apps come back by themselves within seconds.</small>
+      </div>
+      <h2>Release an update</h2>
+      <div class="box">
+        <small style="display:block;color:var(--mut);margin-bottom:8px">Order: 1) deploy on Render and wait until it is Live  2) press the button here. Every open app and web page shows “A new update is ready · Update”. Login and chats stay.</small>
+        <input id="rnote" maxlength="200" placeholder="What is new? (optional)">
+        <button class="btn p" id="rbtn" style="width:100%;margin-top:10px">🚀 Release update to everyone</button>
+        <small id="rlast" style="display:block;color:var(--mut);margin-top:10px"></small>
+      </div>
+    </section>
+    <!-- security -->
+    <section id="t-sc" hidden>
+      <div class="grid" id="scards"></div>
+      <h2>Block an IP</h2>
+      <div class="box"><div style="display:flex;gap:8px;flex-wrap:wrap"><input id="bip" placeholder="IP address" style="flex:2;min-width:150px"><input id="bhr" type="number" min="0" placeholder="Hours (0 = forever)" style="flex:1;min-width:120px"></div>
+      <button class="btn p" id="bgo" style="width:100%;margin-top:10px">Block</button></div>
+      <h2>Blocked now</h2><div id="sblk"></div>
+      <h2>Top suspicious IPs (24 h)</h2><div id="stop"></div>
+      <h2>Latest events</h2><div id="sev"></div>
+    </section>
   </main>
 </div>
 
@@ -183,8 +210,8 @@ $('out').onclick=async()=>{await api('/admin/api/logout','POST').catch(()=>{});s
 let tab='ov',timer;
 document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{tab=b.dataset.t;
   document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('on',x==b));
-  ['ov','of','er','us','ap','hp'].forEach(t=>$('t-'+t).hidden=t!=tab);load()});
-const load=()=>({ov:overview,of:official,er:errors,us:users,ap:appearance,hp:helpdesk}[tab])().catch(e=>{if(e.message!='Login required')toast(e.message)});
+  ['ov','of','er','us','ap','hp','mt','sc'].forEach(t=>$('t-'+t).hidden=t!=tab);load()});
+const load=()=>({ov:overview,of:official,er:errors,us:users,ap:appearance,hp:helpdesk,mt:control,sc:security}[tab])().catch(e=>{if(e.message!='Login required')toast(e.message)});
 
 // ── help desk ──
 const hpE=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -310,6 +337,31 @@ async function users(){
 // ── start ──
 function start(){$('login').hidden=true;$('app').hidden=false;load();clearInterval(timer);timer=setInterval(()=>{if(!document.hidden&&(tab=='ov'||tab=='er'))load()},30000)}
 fetch('/admin/api/session').then(r=>r.status==404?(document.body.textContent='Not found'):r.json()).then(d=>{if(!d)return;d.ok?start():showLogin()}).catch(showLogin);
+
+// ── control (maintenance + release) ──
+async function control(){const d=await api('/admin/api/control');ctlShow(d)}
+function ctlShow(d){const on=!!d.maint;$('mstat').textContent=on?'🔴 Maintenance is ON':'🟢 App is live';$('mmsg').value=d.maintMsg||'';
+  $('rlast').textContent=d.rel?'Last release: '+new Date(d.rel).toLocaleString()+(d.relNote?' — '+d.relNote:''):'No release sent yet.'}
+$('mon').onclick=async()=>{if(!confirm('Turn maintenance ON? Everyone will be locked out until you turn it off.'))return;
+  try{ctlShow(await api('/admin/api/maintenance','POST',{on:true,msg:$('mmsg').value}));toast('Maintenance ON')}catch(e){toast(e.message)}};
+$('moff').onclick=async()=>{try{ctlShow(await api('/admin/api/maintenance','POST',{on:false,msg:$('mmsg').value}));toast('App is live ✓')}catch(e){toast(e.message)}};
+$('rbtn').onclick=async()=>{if(!confirm('Send the “update available” notice to every user now?\nOnly do this after Render shows the new deploy as Live.'))return;
+  try{ctlShow(await api('/admin/api/release','POST',{note:$('rnote').value}));$('rnote').value='';toast('Update notice sent ✓')}catch(e){toast(e.message)}};
+
+// ── security ──
+async function security(){
+  const d=await api('/admin/api/security');if(d.off)return $('scards').replaceChildren(el('div','empty','Security module is off.'));
+  const c=$('scards');c.replaceChildren(card('Blocked IPs',d.blockedNow,'right now',d.blockedNow>0),card('Events 24 h',d.events24),card('Login fails',d.kinds.loginFail||0,'24 h'),card('Scanner probes',d.kinds.scanner||0,'24 h'));
+  const sb=$('sbadge');sb.hidden=!d.blockedNow;sb.textContent=d.blockedNow;
+  const row=(ip,l1,l2,btn)=>{const b=el('div','item'),h=el('div','hd'),l=el('span');l.append(el('b','',ip));h.append(l);if(btn)h.append(btn);b.append(h,el('div','tx',l1));if(l2)b.append(el('div','tx',l2));return b};
+  $('sblk').replaceChildren(...(d.blocked.length?d.blocked.map(x=>{const u=el('button','btn s','Unblock');u.onclick=async()=>{try{await api('/admin/api/security/unblock','POST',{ip:x.ip});toast('Unblocked');security()}catch(e){toast(e.message)}};
+    return row(x.ip,(x.reason||'')+' · '+(x.by||'')+' · '+(x.until?'until '+new Date(x.until).toLocaleString():'forever'),null,u)}):[el('div','empty','Nobody is blocked.')]));
+  $('stop').replaceChildren(...(d.top.length?d.top.map(x=>{const u=x.blocked?el('small','','blocked'):el('button','btn d s','Block 24 h');if(!x.blocked)u.onclick=async()=>{try{await api('/admin/api/security/block','POST',{ip:x.ip,hours:24,reason:'manual from top list'});toast('Blocked');security()}catch(e){toast(e.message)}};
+    return row(x.ip+(x.cc?' · '+x.cc:''),x.pts+' points · '+x.n+' events · '+x.kinds.join(', ')+' · '+ago(x.last),null,u)}):[el('div','empty','All quiet 🎉')]));
+  $('sev').replaceChildren(...(d.events.length?d.events.map(x=>row(x.ip+(x.cc?' · '+x.cc:''),x.kind+' · '+ago(x.ts),(x.detail||'')+(x.ua?'\n'+x.ua:''))):[el('div','empty','No events yet.')]));
+}
+$('bgo').onclick=async()=>{try{await api('/admin/api/security/block','POST',{ip:$('bip').value.trim(),hours:+$('bhr').value||0,reason:'manual'});$('bip').value='';toast('Blocked');security()}catch(e){toast(e.message)}};
+setInterval(()=>{if(!document.hidden&&tab=='sc')security().catch(()=>{})},20000);
 </script>
 </body>
 </html>
