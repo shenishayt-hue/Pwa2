@@ -399,6 +399,7 @@ if(vv){vv.addEventListener('resize',f);vv.addEventListener('scroll',f)}document.
 <input type="file" id="fs" accept="image/*,video/*" hidden><input type="file" id="fsc" accept="image/*" capture="environment" hidden><input type="file" id="fg" accept="image/*,video/*" hidden><input type="file" id="fc" accept="image/*" capture="environment" hidden>
 <script src="/lock.js?v={{V}}"></script>
 <script src="/features.js?v={{V}}"></script>
+<script src="/appstate.js?v={{V}}" defer></script>
 <script src="/emoji.js?v={{V}}" defer></script>
 <script src="/stickers.js?v={{V}}" defer></script>
 <script src="/extras.js?v={{V}}"></script>
@@ -1227,7 +1228,7 @@ document.addEventListener('visibilitychange',()=>{
   oc.bind('omsg',d=>{if(off.list.some(m=>m.id==d.id))return;off.list.push(d);
     if(cur=='official'&&!document.hidden){offBubble(d);scrollEnd();markOffRead()}else{off.unread++;if(cur!='official')navigator.vibrate?.(20)}renderList()});
   oc.bind('odel',()=>loadOfficial().catch(()=>{}));
-  oc.bind('cfg',d=>window.THEME&&THEME.setCfg(d));
+  oc.bind('cfg',d=>{window.THEME&&THEME.setCfg(d);window.APPSTATE&&APPSTATE.set(d)});
   for(const ev of ['status','sview','sdel'])ch.bind(ev,()=>loadStatuses().catch(()=>{}));
   ch.bind('prof',()=>{keys={};loadContacts().then(()=>{if(cur)setSub()}).catch(()=>{})});
   OFF.onBack(()=>{if(cur)pull().catch(()=>{});loadChats().catch(()=>{}).then(ackAll);loadStatuses().catch(()=>{});loadOfficial().catch(()=>{})});
