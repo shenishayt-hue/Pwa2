@@ -403,6 +403,7 @@ if(vv){vv.addEventListener('resize',f);vv.addEventListener('scroll',f)}document.
 <script src="/emoji.js?v={{V}}" defer></script>
 <script src="/stickers.js?v={{V}}" defer></script>
 <script src="/extras.js?v={{V}}"></script>
+<script src="/rich.js?v={{V}}"></script>
 <script>
 const $=id=>document.getElementById(id), enc=new TextEncoder(), dec=new TextDecoder();
 const hex=b=>[...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('');
@@ -428,7 +429,7 @@ function leave(){['lynko_priv','lynko_enc','lk_bio'].forEach(k=>localStorage.rem
 let me,priv,cur=null,contacts=new Map(),chats=new Map(),msgs=[],seen=new Set(),keys={},urls={},pl=new Map(),unlocked=new Set(),lastDay='',tc=0,typingT={},lastTy=0;
 const hm=t=>new Date(t).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
 const dayLbl=t=>{const d=new Date(t),n=new Date(),y=new Date(n-864e5);return d.toDateString()==n.toDateString()?'Today':d.toDateString()==y.toDateString()?'Yesterday':d.toLocaleDateString()};
-const av=(c,cls='')=>`<div class="av ${cls}">${c.dpv?`<img src="/api/dp/${c.id}?v=${c.dpv}" alt="" decoding="async">`:(c.username||'?')[0].toUpperCase()}</div>`;
+const av=(c,cls='')=>`<div class="av ${cls}">${c.group&&c.glv?`<img src="/api/glogo/${String(c.id).slice(2)}?v=${c.glv}" alt="" decoding="async">`:c.dpv?`<img src="/api/dp/${c.id}?v=${c.dpv}" alt="" decoding="async">`:(c.username||'?')[0].toUpperCase()}</div>`;
 const lk=id=>`lk:${me.id}:${id}`;
 const sha=async s=>hex(await crypto.subtle.digest('SHA-256',enc.encode(s)));
 
@@ -523,6 +524,7 @@ const offAv=(cls='')=>`<div class="av ${cls}"><img src="/img/official.jpg${windo
 addEventListener('error',e=>{const t=e.target;if(t&&t.tagName=='IMG'&&t.dataset&&t.dataset.fb&&!t.dataset.fbd){t.dataset.fbd=1;t.src=t.dataset.fb}},true);
 let off={list:[],unread:0};
 function linkify(el,txt){
+  if(window.RICH)return RICH.render(el,txt);
   txt.split(/(https?:\/\/[^\s<]+)/g).forEach((part,i)=>{
     if(i%2){let ok=false;try{ok=/^https?:$/.test(new URL(part).protocol)}catch{}
       if(ok){const a=document.createElement('a');a.href=part;a.target='_blank';a.rel='noopener noreferrer';a.textContent=part;el.appendChild(a);return}}
@@ -753,9 +755,9 @@ function paint(m,p,into){
     if(p.re){const q=document.createElement('div'),th=safeTh(p.re.th);q.className='qt';q.innerHTML=(th?'<img alt="">':'')+'<div><b></b><span></span></div>';
       if(th)q.querySelector('img').src=th;q.querySelector('b').textContent=String(p.re.who||'Status').slice(0,30);if(p.re.mid)q.onclick=e=>{e.stopPropagation();const el=$('m'+p.re.mid);if(el){el.scrollIntoView({block:'center',behavior:'smooth'});el.classList.add('hl');setTimeout(()=>el.classList.remove('hl'),1300)}};
       q.querySelector('span').textContent=p.re.k=='text'?String(p.re.t||''):(p.re.k=='img'?'📷 ':'🎥 ')+String(p.re.t||(p.re.k=='img'?'Photo':'Video'));b.appendChild(q)}
-    const t=document.createElement('div');t.className='tx';t.textContent=p.v;if(!p.re&&jumbo(p.v))b.classList.add('jumbo');b.appendChild(t)}
+    const t=document.createElement('div');t.className='tx';if(window.RICH){if(RICH.render(t,p.v,m.gid?RICH.ctx(m.gid):null))b.classList.add('mnt-me')}else t.textContent=p.v;if(!p.re&&jumbo(p.v))b.classList.add('jumbo');b.appendChild(t)}
   else if(p.k=='aud'){b.classList.add('aud');b.appendChild(audioBox(m,p))}
-  else{b.classList.add('med');b.appendChild(mediaBox(m,p,b));if(p.cap){const t=document.createElement('div');t.className='tx';t.textContent=p.cap;b.appendChild(t)}}
+  else{b.classList.add('med');b.appendChild(mediaBox(m,p,b));if(p.cap){const t=document.createElement('div');t.className='tx';if(window.RICH)RICH.render(t,p.cap,m.gid?RICH.ctx(m.gid):null);else t.textContent=p.cap;b.appendChild(t)}}
   const mt=document.createElement('span');mt.className='meta';mt.innerHTML='<time></time>'+(mine?'<i class="tk"></i>':'');mt.firstChild.textContent=hm(m.ts);b.appendChild(mt);
   b.insertAdjacentHTML('beforeend','<span class="rxp" hidden></span>');
   press(b,()=>menu(m.id));b.ondblclick=()=>react(m.id,'❤️',b);swipeReply(r);
@@ -1790,7 +1792,7 @@ ${G} .lg{background:linear-gradient(120deg,#4f7cff,#a98bff 60%,#ff7ab6);-webkit-
       if (method == 'DELETE' && (m = url.match(/^\/api\/messages\/([a-f0-9]{24})$/)) && GX.is(cur)) return { url: '/api/gmessages/' + m[1], method: 'DELETE' };
       return null;
     },
-    inject() { for (const [id, g] of GX.groups) contacts.set('g:' + id, { id: 'g:' + id, username: g.name, group: true, pub: '', about: g.members.length + ' members', dpv: 0 }) },
+    inject() { for (const [id, g] of GX.groups) contacts.set('g:' + id, { id: 'g:' + id, username: g.name, group: true, pub: '', about: g.members.length + ' members', dpv: 0, glv: g.logoV || 0, desc: g.desc || '' }) },
     async load() {
       let gs; try { gs = await api('/api/groups') } catch { return }
       if (!Array.isArray(gs)) return; const ids = new Set();
@@ -1829,16 +1831,41 @@ ${G} .lg{background:linear-gradient(120deg,#4f7cff,#a98bff 60%,#ff7ab6);-webkit-
       const o = page(g.name), bd = o.querySelector('.bd');
       const draw = () => {
         const g2 = GX.groups.get(gid); if (!g2) return o.remove();
-        bd.innerHTML = `<p class="v2n" style="text-align:center">${g2.members.length} members · end-to-end encrypted · messages vanish after 24 hours</p>` +
-          (mineAdmin ? '<div class="v2row2"><button class="btn" id="gxadd">➕ Add people</button><button class="btn" id="gxren">✏️ Rename</button></div>' : '') +
+        bd.innerHTML = `<div style="display:flex;justify-content:center;margin:4px 0 8px">${av({ id: 'g:' + gid, username: g2.name, group: true, glv: g2.logoV }, 'big')}</div><div style="text-align:center;font:700 20px system-ui">${E(g2.name)}</div><p class="v2n" style="text-align:center">${g2.members.length} members · end-to-end encrypted · messages vanish after 24 hours</p>` +
+          (g2.desc ? `<div style="white-space:pre-wrap;word-break:break-word;margin:6px 0 12px;line-height:1.45">${E(g2.desc)}</div>` : mineAdmin ? '<div style="opacity:.6;margin:6px 0 12px;text-align:center"><i>No group description yet</i></div>' : '') +
+          (mineAdmin ? '<div class="v2row2"><button class="btn" id="gxadd">➕ Add people</button><button class="btn" id="gxren">✏️ Rename</button></div><div class="v2row2"><button class="btn" id="gxlg">🖼 Group photo</button><button class="btn" id="gxds">📝 Description</button></div>' + (g2.logoV ? '<button class="btn d" id="gxlgx" style="width:100%;margin:6px 0">Remove group photo</button>' : '') : '') +
           '<div class="v2g">' + g2.members.map(u => `<div class="v2r"><div class="v2t"><b>${E(GX.who(u.id))}${u.id == g2.owner ? '<em>Owner</em>' : g2.admins.includes(u.id) ? '<em>Admin</em>' : ''}</b><small>ID ${E(u.id)}</small></div>${u.id != me.id && mineAdmin && u.id != g2.owner ? `<button class="v2x" data-r="${u.id}">Remove</button>` : ''}${u.id != me.id && g2.owner == me.id && u.id != g2.owner ? `<button class="v2x" style="color:var(--rose)" data-a="${u.id}">${g2.admins.includes(u.id) ? 'Demote' : 'Make admin'}</button>` : ''}</div>`).join('') + '</div><button class="btn d" id="gxlv" style="width:100%">Leave group</button>';
-        bd.querySelectorAll('[data-r]').forEach(b => b.onclick = async () => { try { await api('/api/groups/' + gid + '/remove', 'POST', { id: b.dataset.r }); await GX.load(); draw() } catch (e) { toast(e.message) } });
+        bd.querySelectorAll('[data-r]').forEach(b => b.onclick = async () => { if (!await ask('Remove ' + GX.who(b.dataset.r) + ' from this group?', { ok: 'Remove' })) return; try { await api('/api/groups/' + gid + '/remove', 'POST', { id: b.dataset.r }); await GX.load(); draw() } catch (e) { toast(e.message) } });
         bd.querySelectorAll('[data-a]').forEach(b => b.onclick = async () => { try { await api('/api/groups/' + gid + '/admin', 'POST', { id: b.dataset.a, on: !g2.admins.includes(b.dataset.a) }); await GX.load(); draw() } catch (e) { toast(e.message) } });
         const add = $('gxadd'); if (add) add.onclick = () => GX.add(gid, draw);
+        const lg = $('gxlg'); if (lg) lg.onclick = () => GX.pickLogo(gid, draw);
+        const lx = $('gxlgx'); if (lx) lx.onclick = async () => { if (!await ask('Remove the group photo?', { ok: 'Remove' })) return; try { await api('/api/groups/' + gid + '/logo', 'DELETE'); await GX.load(); draw() } catch (e) { toast(e.message) } };
+        const ds = $('gxds'); if (ds) ds.onclick = () => GX.editDesc(gid, g2.desc || '', draw);
         const ren = $('gxren'); if (ren) ren.onclick = async () => { const n = prompt('Group name', g2.name); if (!n || !n.trim()) return; try { await api('/api/groups/' + gid + '/rename', 'POST', { name: n.trim() }); await GX.load(); draw() } catch (e) { toast(e.message) } };
         $('gxlv').onclick = async () => { await GX.leave(gid); o.remove() };
       };
       draw();
+    },
+    pickLogo(gid, done) {
+      const f = document.createElement('input'); f.type = 'file'; f.accept = 'image/*';
+      f.onchange = async () => {
+        const file = f.files[0]; if (!file) return;
+        try {   // square-crop to 256x256 here, the server stores a small JPEG
+          const bmp = await createImageBitmap(file), c = document.createElement('canvas'); c.width = c.height = 256;
+          const sz = Math.min(bmp.width, bmp.height); c.getContext('2d').drawImage(bmp, (bmp.width - sz) / 2, (bmp.height - sz) / 2, sz, sz, 0, 0, 256, 256);
+          const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', .85));
+          const r = await fetch('/api/groups/' + gid + '/logo', { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: blob }), d = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(d.error || 'Upload failed');
+          await GX.load(); done && done(); toast('Group photo updated ✓');
+        } catch (e) { toast(e.message || 'Could not use that image') }
+      };
+      f.click();
+    },
+    editDesc(gid, cur0, done) {
+      const o = sheet('<h3 style="margin-bottom:8px">Group description</h3><textarea id="gxdt" maxlength="300" rows="5" style="width:100%" placeholder="What is this group about?">' + E(cur0) + '</textarea><button class="btn p" id="gxdsv" style="width:100%;margin-top:10px">Save</button>');
+      o.querySelector('#gxdsv').onclick = async () => {
+        try { await api('/api/groups/' + gid + '/desc', 'POST', { desc: o.querySelector('#gxdt').value }); o.remove(); await GX.load(); done && done(); toast('Description saved ✓') } catch (e) { toast(e.message) }
+      };
     },
     add(gid, done) {
       const g = GX.groups.get(gid), have = new Set(g.members.map(m => m.id)), list = [...contacts.values()].filter(c => !c.group && !c.bot && !have.has(c.id));
