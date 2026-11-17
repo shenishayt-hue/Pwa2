@@ -15,7 +15,7 @@ const sha = s => crypto.createHash('sha256').update(String(s)).digest();
 const same = (a, b) => crypto.timingSafeEqual(sha(a), sha(b));
 const esc = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-module.exports = function monitor({ secret, pusher, store, C }) {
+module.exports = function monitor({ secret, pusher, store, C, sec }) {
   const ADMIN_USER = process.env.ADMIN_USER || '', ADMIN_PASS = process.env.ADMIN_PASS || '';
   const ON = !!(ADMIN_USER && ADMIN_PASS);
   const COOKIE = 'lynko_admin';
@@ -101,10 +101,10 @@ module.exports = function monitor({ secret, pusher, store, C }) {
     app.post('/admin/api/login', (req, res) => {
       if (!ON) return res.status(404).end();
       hdr(res);
-      if (blocked(req.ip)) return res.status(429).json({ error: 'Too many wrong tries. Wait 15 minutes.' });
+      if (blocked(req.ip)) { sec && sec.strike(req, 'adminLoginBlocked', 2); return res.status(429).json({ error: 'Too many wrong tries. Wait 15 minutes.' }); }
       const { username, password } = req.body || {};
       const a = same(username || '', ADMIN_USER), b = same(password || '', ADMIN_PASS);
-      if (!(a && b)) { fail(req.ip); return res.status(401).json({ error: 'Wrong username or password' }); }
+      if (!(a && b)) { fail(req.ip); sec && sec.strike(req, 'adminLoginFail', 4, 'admin login'); return res.status(401).json({ error: 'Wrong username or password' }); }
       fails.delete(req.ip);
       res.cookie(COOKIE, jwt.sign({ adm: 1, v: version }, secret, { expiresIn: '12h' }),
         { httpOnly: true, sameSite: 'strict', secure: req.secure, path: '/admin', maxAge: 12 * 36e5 });
@@ -193,6 +193,25 @@ module.exports = function monitor({ secret, pusher, store, C }) {
       try { const d = await appcfg.setLogo(C, await raw(req, 2 * 1024 * 1024 + 1)); push(d); res.json(d); }
       catch (e) { res.status(400).json({ error: e.message }); }
     });
+    // ── maintenance mode + "release update" (users get an update banner) ──
+    app.get('/admin/api/control', guard, (q, r) => r.json(appcfg.pub()));
+    app.post('/admin/api/maintenance', guard, async (req, res) => {
+      try { const d = await appcfg.setMaint(C, !!(req.body || {}).on, (req.body || {}).msg); push(d); res.json(d); }
+      catch (e) { res.status(400).json({ error: e.message }); }
+    });
+    app.post('/admin/api/release', guard, async (req, res) => {
+      try { const d = await appcfg.release(C, (req.body || {}).note); push(d); res.json(d); }
+      catch (e) { res.status(400).json({ error: e.message }); }
+    });
+    // ── security: attack log, top attacker IPs, blocked IPs ──
+    app.get('/admin/api/security', guard, async (q, r) => { if (!sec) return r.json({ off: true }); r.json(await sec.report()); });
+    app.post('/admin/api/security/block', guard, async (req, res) => {
+      const b = req.body || {}, ip = sec.clean(b.ip), h = Math.min(Math.max(+b.hours || 0, 0), 24 * 365);
+      if (!/^[0-9a-fA-F:.]{3,45}$/.test(ip)) return res.status(400).json({ error: 'Enter a valid IP address' });
+      if (!(await sec.block(ip, h, String(b.reason || 'manual').slice(0, 100), 'admin'))) return res.status(400).json({ error: 'That IP is on the allow list' });
+      res.json({ ok: 1 });
+    });
+    app.post('/admin/api/security/unblock', guard, async (req, res) => { await sec.unblock(String((req.body || {}).ip || '')); res.json({ ok: 1 }); });
     app.delete('/admin/api/logo', guard, async (req, res) => {
       try { const d = await appcfg.clearLogo(C); push(d); res.json(d); } catch (e) { res.status(400).json({ error: e.message }); }
     });
